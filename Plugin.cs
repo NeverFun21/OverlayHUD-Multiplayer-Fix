@@ -124,6 +124,8 @@ namespace OverlayHUD
         private bool wasCursorVisible = false;
         private bool pendingCursorState = false;
         private float cursorStateChangeTime = 0f;
+        private bool wasOverlayHidden = false;
+        private float focusLostTime = 0f; // <-- Добавь эту строку
 
         private ConfigEntry<string> endpoint, levelEndpoint, overlayAppRelativePath, overlayAppArchiveName;
         private ConfigEntry<float> scanInterval, statusInterval;
@@ -292,6 +294,28 @@ namespace OverlayHUD
                 }
                 return;
             }
+
+            // --- НОВЫЙ КОД: Умное скрытие оверлея ---
+            if (Application.isFocused)
+            {
+                focusLostTime = 0f;
+                if (wasOverlayHidden)
+                {
+                    wasOverlayHidden = false;
+                    if (gameObject.activeInHierarchy) StartCoroutine(PostTabHidden(false));
+                }
+            }
+            else
+            {
+                focusLostTime += Time.unscaledDeltaTime;
+                // Ждем 0.5 секунды. Уведомления Windows крадут фокус лишь на мгновение.
+                if (focusLostTime > 0.5f && !wasOverlayHidden)
+                {
+                    wasOverlayHidden = true;
+                    if (gameObject.activeInHierarchy) StartCoroutine(PostTabHidden(true));
+                }
+            }
+            // ----------------------------------------
 
             bool isCursorVisible = Cursor.visible;
             if (isCursorVisible != pendingCursorState)
