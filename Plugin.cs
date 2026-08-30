@@ -31,10 +31,11 @@ namespace OverlayHUD
         private static readonly object enemyLock = new object();
         private static readonly object reflectionCacheLock = new object();
         private static readonly object networkQueueLock = new object();
-        private static readonly Dictionary<string, MemberInfo> memberCache = new Dictionary<string, MemberInfo>();
-        private static readonly HashSet<string> missingMemberCache = new HashSet<string>();
-        private static readonly Dictionary<string, MethodInfo> noArgMethodCache = new Dictionary<string, MethodInfo>();
-        private static readonly HashSet<string> missingNoArgMethodCache = new HashSet<string>();
+
+        // Оптимизированный кэш Рефлексии (Больше никаких лагов от сборщика мусора!)
+        private static readonly Dictionary<Type, Dictionary<string, MemberInfo>> fastMemberCache = new Dictionary<Type, Dictionary<string, MemberInfo>>();
+        private static readonly Dictionary<Type, Dictionary<string, MethodInfo>> fastNoArgMethodCache = new Dictionary<Type, Dictionary<string, MethodInfo>>();
+
         private static Task networkQueueTail = Task.CompletedTask;
         private static int latestMonsterStatusRequestVersion;
         private static int latestMapValueRequestVersion;
@@ -138,6 +139,7 @@ namespace OverlayHUD
             levelEndpoint = Config.Bind("Overlay", "LevelEndpoint", "http://127.0.0.1:8787/api/level", "Level sync endpoint on this PC.");
             scanInterval = Config.Bind("Detection", "ScanIntervalSeconds", 6f, "How often pending enemy roster sync is retried.");
             statusInterval = Config.Bind("Detection", "StatusIntervalSeconds", 15f, "How often monster health/respawn sync is retried.");
+
             requireLineOfSight = Config.Bind("Detection", "RequireLineOfSight", true, "Reveal monsters only after an encounter.");
             requireLineOfSight.Value = true;
             Config.Save();
@@ -284,8 +286,7 @@ namespace OverlayHUD
         {
             if (!gameplayActive)
             {
-                // ЗАЩИТА ДЛЯ КЛИЕНТОВ: если сцена уже загружена, но оверлей спит
-                if (pendingGameplayActivation == null && IsRunLevelName(SceneManager.GetActiveScene().name))
+                if (pendingGameplayActivation == null && CachedIsRunLevel(SceneManager.GetActiveScene().name))
                 {
                     ScheduleGameplayActivation("Client update fallback");
                 }
@@ -304,7 +305,7 @@ namespace OverlayHUD
                 if (gameObject.activeInHierarchy) StartCoroutine(PostCursorState(wasCursorVisible));
             }
 
-            if (!IsMasterClientOrSingleplayer())
+            if (!CachedIsMasterClient())
             {
                 var keys = new List<int>(clientSimulatedTimers.Keys);
                 foreach (int k in keys)
@@ -375,7 +376,7 @@ namespace OverlayHUD
 
         private static void ExtractionCompletedPostfix() { instance?.RefreshMapValue("extraction completed"); }
         private static void ValuableDollarValueSetRpcPostfix(object __instance, float value) { instance?.ScheduleMapValueRefresh("valuable rpc"); }
-        private static void ValuableDollarValueSetLogicPostfix(object __instance) { if (IsMasterClientOrSingleplayer()) instance?.ScheduleMapValueRefresh("valuable logic"); }
+        private static void ValuableDollarValueSetLogicPostfix(object __instance) { if (CachedIsMasterClient()) instance?.ScheduleMapValueRefresh("valuable logic"); }
         private static void ValuableDollarHaulAddPostfix(object __instance) { TrackDollarHaulValuable(__instance, true); }
         private static void ValuableDollarHaulRemovePostfix(object __instance) { TrackDollarHaulValuable(__instance, false); }
 
@@ -388,7 +389,7 @@ namespace OverlayHUD
 
         private static void PhysGrabObjectDestroyedPostfix(object __instance)
         {
-            if (!IsRunLevel()) return;
+            if (!CachedIsRunLevel(null)) return;
             Component valuable = GetValuableComponent(__instance);
             if (valuable == null) return;
             float current = ReadValuableCurrentValue(valuable), orig = ReadValuableOriginalValue(valuable);
@@ -470,9 +471,9 @@ namespace OverlayHUD
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            if (gameplayActive && !IsRunLevel() && !IsRunLevelName(scene.name))
+            if (gameplayActive && !CachedIsRunLevel(scene.name))
                 HandleLevelChanging();
-            else if (!gameplayActive && (IsRunLevel() || IsRunLevelName(scene.name)))
+            else if (!gameplayActive && CachedIsRunLevel(scene.name))
                 ScheduleGameplayActivation("Scene loaded");
         }
 
@@ -527,11 +528,13 @@ namespace OverlayHUD
             lastMapValueFingerprint = ""; mapValueDirty = false; pendingMapValueRefresh = false; pendingMapValueRefreshReason = "";
         }
 
-        private void RefreshMapValue(string reason) { if (IsRunLevel()) { mapValue = CalculateMapValue(); MarkMapValueDirty(); } }
-        private void ScheduleMapValueRefresh(string reason) { if (IsRunLevel()) { pendingMapValueRefresh = true; pendingMapValueRefreshReason = reason; MarkMapValueDirty(); } }
-        private void AddMapValue(float delta, string reason) { if (IsRunLevel() && !float.IsNaN(delta) && Math.Abs(delta) >= 0.01f) { mapValue = Math.Max(0f, mapValue + delta); MarkMapValueDirty(); } }
-        private void AddLostValue(float value, string reason) { if (IsRunLevel() && !float.IsNaN(value) && value >= 0.01f) { lostValue += value; MarkMapValueDirty(); } }
-        private void MarkMapValueDirty() { mapValueDirty = true; nextMapValueSyncAt = Time.realtimeSinceStartup + 0.2f; }
+        private void RefreshMapValue(string reason) { if (CachedIsRunLevel(null)) { mapValue = CalculateMapValue(); MarkMapValueDirty(); } }
+        private void ScheduleMapValueRefresh(string reason) { if (CachedIsRunLevel(null)) { pendingMapValueRefresh = true; pendingMapValueRefreshReason = reason; MarkMapValueDirty(); } }
+        private void AddMapValue(float delta, string reason) { if (CachedIsRunLevel(null) && !float.IsNaN(delta) && Math.Abs(delta) >= 0.01f) { mapValue = Math.Max(0f, mapValue + delta); MarkMapValueDirty(); } }
+        private void AddLostValue(float value, string reason) { if (CachedIsRunLevel(null) && !float.IsNaN(value) && value >= 0.01f) { lostValue += value; MarkMapValueDirty(); } }
+
+        // ОПТИМИЗАЦИЯ: Увеличиваем задержку отправки стоимости лута, чтобы не лагало при смерти и лутании
+        private void MarkMapValueDirty() { mapValueDirty = true; nextMapValueSyncAt = Time.realtimeSinceStartup + 1.0f; }
 
         private void SyncMapValueIfChanged()
         {
@@ -683,18 +686,16 @@ namespace OverlayHUD
                 int id = candidate.Root.GetInstanceID();
                 if (!alive)
                 {
-                    if (IsMasterClientOrSingleplayer())
+                    if (CachedIsMasterClient())
                     {
-                        remaining = realTimer > 0f ? realTimer : 60f;
+                        // У хоста таймер всегда правильный
+                        remaining = realTimer;
                         instance.clientSimulatedTimers[id] = remaining;
                     }
                     else
                     {
-                        if (!instance.clientSimulatedTimers.TryGetValue(id, out float sim))
-                        {
-                            instance.clientSimulatedTimers[id] = realTimer > 0f ? realTimer : 60f;
-                        }
-                        else if (realTimer > 0f && realTimer < sim - 2f)
+                        // У клиента: если пришла новая цифра по сети (отличается от нашей симуляции), обновляем
+                        if (!instance.clientSimulatedTimers.TryGetValue(id, out float sim) || (realTimer > 0f && Math.Abs(realTimer - sim) > 1.5f))
                         {
                             instance.clientSimulatedTimers[id] = realTimer;
                         }
@@ -723,7 +724,6 @@ namespace OverlayHUD
         {
             if (!gameplayActive || enemyHealthSource == null) return;
             Component enemyParent = ReadMember(ReadMember(enemyHealthSource, "enemy") as Component, "EnemyParent") as Component;
-
             SyncEnemyParentStatusChanged(enemyParent);
         }
 
@@ -903,7 +903,7 @@ namespace OverlayHUD
             object levelsValue = ReadMember(runManager, "levels");
             if (currentLevel != null && levelsValue is IList levels && levels.Contains(currentLevel)) return true;
             if (IsNamedRunLevel(currentLevel)) return true;
-            return IsRunLevel();
+            return CachedIsRunLevel(null);
         }
 
         private static bool IsGameplayLevelCandidate(out string details, bool allowExpensiveFallback = false)
@@ -916,10 +916,10 @@ namespace OverlayHUD
             bool nonGameplayCurrent = IsNonGameplayLevelName(currentLevelName);
             bool listedLevel = !nonGameplayCurrent && currentLevel != null && levelsValue is IList levels && levels.Contains(currentLevel);
             bool namedLevel = IsNamedRunLevel(currentLevel);
-            bool runLevel = !nonGameplayCurrent && IsRunLevel();
+            bool runLevel = !nonGameplayCurrent && CachedIsRunLevel(null);
             bool hasLevelGenerator = false;
 
-            bool levelGenerated = IsLevelGenerated() || !IsMasterClientOrSingleplayer();
+            bool levelGenerated = IsLevelGenerated() || !CachedIsMasterClient();
 
             string activeSceneName = SceneManager.GetActiveScene().name;
             bool nonGameplayScene = IsNonGameplayLevelName(activeSceneName);
@@ -974,8 +974,34 @@ namespace OverlayHUD
 
         private static string DescribeCurrentLevel(object runManager) { return DescribeLevelObject(ReadMember(runManager, "levelCurrent")); }
         private static string DescribeLevelObject(object currentLevel) { if (currentLevel == null) return "<null>"; if (currentLevel is UnityEngine.Object unityObject) return string.IsNullOrWhiteSpace(unityObject.name) ? unityObject.ToString() : unityObject.name; return currentLevel.ToString(); }
-        private static bool IsRunLevel() { object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "RunIsLevel"); return result is bool value && value; }
-        private static bool IsMasterClientOrSingleplayer() { object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "IsMasterClientOrSingleplayer"); return !(result is bool value) || value; }
+
+        // ОПТИМИЗАЦИЯ: Кэширование проверок состояния игры, чтобы не убивать ФПС
+        private static bool isRunLevelCache = false;
+        private static float nextRunLevelCheck = 0f;
+        private static bool CachedIsRunLevel(string sceneName)
+        {
+            if (sceneName != null && IsRunLevelName(sceneName)) return true;
+            if (Time.unscaledTime > nextRunLevelCheck)
+            {
+                object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "RunIsLevel");
+                isRunLevelCache = result is bool value && value;
+                nextRunLevelCheck = Time.unscaledTime + 1f;
+            }
+            return isRunLevelCache;
+        }
+
+        private static bool isMasterCache = true;
+        private static float nextMasterCheck = 0f;
+        private static bool CachedIsMasterClient()
+        {
+            if (Time.unscaledTime > nextMasterCheck)
+            {
+                object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "IsMasterClientOrSingleplayer");
+                isMasterCache = !(result is bool value) || value;
+                nextMasterCheck = Time.unscaledTime + 2f;
+            }
+            return isMasterCache;
+        }
 
         private static float CalculateMapValue()
         {
@@ -1001,7 +1027,7 @@ namespace OverlayHUD
 
         private static void TrackDollarHaulValuable(object source, bool inHaul)
         {
-            if (!IsRunLevel()) return;
+            if (!CachedIsRunLevel(null)) return;
             int key = GetValuableKey(source);
             if (key == 0) return;
             if (inHaul) valuablesInDollarHaul.Add(key); else valuablesInDollarHaul.Remove(key);
@@ -1463,26 +1489,40 @@ namespace OverlayHUD
             return ReadIntMember(ReadMember(player, "photonView"), "ViewID");
         }
 
+        // ОПТИМИЗАЦИЯ РЕФЛЕКСИИ (Убирает лаги GC при чтении переменных)
         private static object ReadMember(object source, string memberName)
         {
             if (source == null) return null;
             Type type = source as Type ?? source.GetType();
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
-            string cacheKey = type.AssemblyQualifiedName + "\n" + memberName;
+
+            Dictionary<string, MemberInfo> typeCache;
+            lock (reflectionCacheLock)
+            {
+                if (!fastMemberCache.TryGetValue(type, out typeCache))
+                {
+                    typeCache = new Dictionary<string, MemberInfo>();
+                    fastMemberCache[type] = typeCache;
+                }
+            }
+
             MemberInfo member;
             lock (reflectionCacheLock)
             {
-                if (missingMemberCache.Contains(cacheKey)) return null;
-                memberCache.TryGetValue(cacheKey, out member);
+                if (!typeCache.TryGetValue(memberName, out member))
+                {
+                    const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+                    member = type.GetField(memberName, flags) as MemberInfo ?? type.GetProperty(memberName, flags);
+                    typeCache[memberName] = member;
+                }
             }
-            if (member == null)
-            {
-                member = type.GetField(memberName, flags);
-                if (member == null) { PropertyInfo candidate = type.GetProperty(memberName, flags); if (candidate != null && candidate.GetIndexParameters().Length == 0) member = candidate; }
-                lock (reflectionCacheLock) { if (member == null) missingMemberCache.Add(cacheKey); else memberCache[cacheKey] = member; }
-            }
+
+            if (member == null) return null;
             if (member is FieldInfo field) return (!field.IsStatic && source is Type) ? null : field.GetValue(field.IsStatic ? null : source);
-            if (member is PropertyInfo property) { try { MethodInfo getter = property.GetGetMethod(true); if (getter == null || (!getter.IsStatic && source is Type)) return null; return property.GetValue(getter.IsStatic ? null : source, null); } catch { return null; } }
+            if (member is PropertyInfo property && property.CanRead)
+            {
+                var getter = property.GetGetMethod(true);
+                return (getter != null && (getter.IsStatic || !(source is Type))) ? property.GetValue(getter.IsStatic ? null : source, null) : null;
+            }
             return null;
         }
 
@@ -1490,11 +1530,28 @@ namespace OverlayHUD
         {
             if (source == null) return null;
             Type type = source as Type ?? source.GetType();
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
-            string cacheKey = type.AssemblyQualifiedName + "\n" + methodName + "()";
+
+            Dictionary<string, MethodInfo> typeCache;
+            lock (reflectionCacheLock)
+            {
+                if (!fastNoArgMethodCache.TryGetValue(type, out typeCache))
+                {
+                    typeCache = new Dictionary<string, MethodInfo>();
+                    fastNoArgMethodCache[type] = typeCache;
+                }
+            }
+
             MethodInfo method;
-            lock (reflectionCacheLock) { if (missingNoArgMethodCache.Contains(cacheKey)) return null; noArgMethodCache.TryGetValue(cacheKey, out method); }
-            if (method == null) { method = type.GetMethod(methodName, flags, null, Type.EmptyTypes, null); lock (reflectionCacheLock) { if (method == null) missingNoArgMethodCache.Add(cacheKey); else noArgMethodCache[cacheKey] = method; } }
+            lock (reflectionCacheLock)
+            {
+                if (!typeCache.TryGetValue(methodName, out method))
+                {
+                    const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+                    method = type.GetMethod(methodName, flags, null, Type.EmptyTypes, null);
+                    typeCache[methodName] = method;
+                }
+            }
+
             if (method == null || (!method.IsStatic && source is Type)) return null;
             try { return method.Invoke(method.IsStatic ? null : source, null); } catch { return null; }
         }
