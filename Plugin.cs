@@ -136,9 +136,8 @@ namespace OverlayHUD
             KeepPluginObjectAlive();
             endpoint = Config.Bind("Overlay", "Endpoint", "http://127.0.0.1:8787/api/monster-seen", "Monster endpoint on this PC.");
             levelEndpoint = Config.Bind("Overlay", "LevelEndpoint", "http://127.0.0.1:8787/api/level", "Level sync endpoint on this PC.");
-            scanInterval = Config.Bind("Detection", "ScanIntervalSeconds", 3f, "How often pending enemy roster sync is retried.");
-            statusInterval = Config.Bind("Detection", "StatusIntervalSeconds", 10f, "How often monster health/respawn sync is retried.");
-
+            scanInterval = Config.Bind("Detection", "ScanIntervalSeconds", 6f, "How often pending enemy roster sync is retried.");
+            statusInterval = Config.Bind("Detection", "StatusIntervalSeconds", 15f, "How often monster health/respawn sync is retried.");
             requireLineOfSight = Config.Bind("Detection", "RequireLineOfSight", true, "Reveal monsters only after an encounter.");
             requireLineOfSight.Value = true;
             Config.Save();

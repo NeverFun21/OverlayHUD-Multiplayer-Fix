@@ -779,7 +779,7 @@ body {
     height: 100%;
     border-radius: inherit;
     object-fit: cover;
-    filter: drop-shadow(0 0 var(--monster-glow-radius) var(--glow-color));
+    box-shadow: inset 0 0 var(--monster-glow-radius) var(--glow-color);
     z-index: 1;
 }
 
