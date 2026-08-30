@@ -1,0 +1,166 @@
+const OverlayApp = (() => {
+    const storageKey = "overlay-control-state-v2";
+    const channelName = "overlay-control-channel";
+    const channel = "BroadcastChannel" in window ? new BroadcastChannel(channelName) : null;
+    const serverSyncEnabled = window.location.protocol === "http:" || window.location.protocol === "https:";
+
+    const monsterConfig = {
+        levels: {
+            1: ["Peeper", "Shadow Child", "Gnomes", "Apex Predator", "Spewer", "Bella", "Birthday Boy", "Elsa", "Tick"],
+            2: ["Rugrat", "Animal", "Upscream", "Chef", "Hidden", "Bowtie", "Mentalist", "Banger", "Gambit", "Headgrab", "Heart Hugger", "Oogly"],
+            3: ["Headman", "Robe", "Huntsman", "Reaper", "Clown", "Trudge", "Cleanup Crew", "Loom"]
+        },
+        strength: {
+            Banger: 0, Gnome: 0, Gnomes: 0, Animal: 4, "Birthday Boy": 4, Headgrab: 4, Mentalist: 4, Hidden: 4,
+            Rugrat: 4, Spewer: 4, Upscream: 4, Bowtie: 7, Bella: 9, Chef: 9, Gambit: 9, "Heart Hugger": 9,
+            Huntsman: 9, Oogly: 9, Reaper: 9, "Shadow Child": 9, "Cleanup Crew": 13, Clown: 13, Headman: 13,
+            Loom: 13, Robe: 13, Trudge: 13, "Apex Predator": "impossible", Elsa: "impossible", Peeper: "impossible", Tick: "impossible"
+        },
+        replacements: [
+            "Animals", "Upscreams", "Bowties", "Rugrat", "Mentalists", "Peepers", "Hidden", "Apex Predators", "Chefs", "Spewers", "Shadow Children",
+            "Bangers", "Gnomes", "Bella", "Birthday Boy", "Elsa", "Gambit", "Headgrab", "Heart Hugger", "Oogly", "Tick"
+        ]
+    };
+
+    const levelMonsterCounts = {
+        "1-2": { level1: 1, level2: 0, level3: 1 },
+        "3-5": { level1: 1, level2: 1, level3: 1 },
+        "6-8": { level1: 2, level2: 2, level3: 2 },
+        "9": { level1: 2, level2: 3, level3: 2 },
+        "10-19": { level1: 2, level2: 3, level3: 3 },
+        "20+": { level1: 3, level2: 4, level3: 4 }
+    };
+
+    const upgradeKeys = ["strength", "tumbleLaunch", "range", "sprintSpeed", "tumbleWings", "crouchRest", "extraJump", "tumbleClimb", "health", "stamina", "mapPlayerCount", "deathHeadBattery"];
+    const defaultUpgradeVisibility = upgradeKeys.reduce((acc, key) => { acc[key] = (key !== "health" && key !== "stamina"); return acc; }, {});
+
+    const defaultState = {
+        level: 1, gameplayVisible: false, tabHidden: false, cursorVisible: false, players: {}, onlyMyUpgrades: true,
+        strength: 0, tumbleLaunch: 0, range: 0, sprintSpeed: 0, tumbleWings: 0, crouchRest: 0, extraJump: 0, tumbleClimb: 0, health: 0, stamina: 0, mapPlayerCount: 0, deathHeadBattery: 0,
+        upgradeVisibility: { ...defaultUpgradeVisibility }, style: 1, interfaceLanguage: "ru", bgEnabled: false, timerVisible: true, upgradesVisible: true, upgradeLayout: "inline",
+        compactModeEnabled: true, upgradeRows: "double", mapValueVisible: true, lostValueVisible: true, valueWrapEnabled: true, monsterIconsVisible: true, levelBadgeVisible: true,
+        upgradeTooltipsVisible: false, monsterHealthBarsVisible: true, monsterProximityWavesVisible: true, monsterStrengthVisible: true, respawnTimerVisible: true, respawnIndicatorVisible: true,
+        onlyAliveMonstersVisible: false, onlyAliveIncludeUndetected: false, squareSize: 70, upgradeSize: 38, overlayScaleVersion: 3, columnsCount: 11, columnsLayoutVersion: 2, overlayDefaultsVersion: 4,
+        overlayAlignment: "center", overlayPosition: { left: 0, top: 0, anchorX: "center", anchorY: "top" }, controlsPosition: null, hoverOpacity: 50, seconds: 0, running: false, startedAt: null,
+        monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0
+    };
+
+    let state = defaultState;
+    state = normalizeState(loadState());
+    const listeners = new Set();
+    let serverSyncReady = false;
+
+    function loadState() { try { return localStorage.getItem(storageKey) ? JSON.parse(localStorage.getItem(storageKey)) : defaultState; } catch { return state || defaultState; } }
+
+    function normalizeState(nextState) {
+        const source = nextState || defaultState;
+        const sourceSquareSize = Number(source.squareSize), sourceUpgradeSize = Number(source.upgradeSize), shouldMigrateDefaultSizes = Number(source.overlayScaleVersion) < 3;
+        const sourceOverlayDefaultsVersion = Number(source.overlayDefaultsVersion || 0), shouldMigrateOverlayDefaults = sourceOverlayDefaultsVersion < 2;
+        const squareSize = Number.isFinite(sourceSquareSize) ? (shouldMigrateDefaultSizes && (sourceSquareSize === 50 || sourceSquareSize === 64) ? defaultState.squareSize : sourceSquareSize) : defaultState.squareSize;
+        const upgradeSize = Number.isFinite(sourceUpgradeSize) ? (shouldMigrateDefaultSizes && sourceUpgradeSize === 32 ? defaultState.upgradeSize : sourceUpgradeSize) : defaultState.upgradeSize;
+        const sourceColumnsCount = Number(source.columnsCount), columnsCount = Number.isFinite(sourceColumnsCount) ? (shouldMigrateOverlayDefaults && sourceColumnsCount === 7 ? defaultState.columnsCount : sourceColumnsCount) : defaultState.columnsCount;
+        const hoverOpacity = Number.isFinite(Number(source.hoverOpacity)) ? Math.min(100, Math.max(20, Number(source.hoverOpacity))) : defaultState.hoverOpacity;
+        const interfaceLanguage = source.interfaceLanguage === "en" ? "en" : defaultState.interfaceLanguage;
+        const normalizedOverlayAlignment = ["left", "center", "right"].includes(source.overlayAlignment) ? source.overlayAlignment : defaultState.overlayAlignment, overlayAlignment = shouldMigrateOverlayDefaults && normalizedOverlayAlignment === "left" ? defaultState.overlayAlignment : normalizedOverlayAlignment;
+        const hasCompactModeEnabled = Object.prototype.hasOwnProperty.call(source, "compactModeEnabled"), normalizedCompactModeEnabled = hasCompactModeEnabled && typeof source.compactModeEnabled === "boolean" ? source.compactModeEnabled : source.upgradeLayout === "inline", compactModeEnabled = shouldMigrateOverlayDefaults && !normalizedCompactModeEnabled && source.upgradeLayout !== "inline" ? defaultState.compactModeEnabled : normalizedCompactModeEnabled;
+        const normalizedUpgradeRows = ["single", "double"].includes(source.upgradeRows) ? source.upgradeRows : defaultState.upgradeRows, upgradeRows = shouldMigrateOverlayDefaults && normalizedUpgradeRows === "single" ? defaultState.upgradeRows : normalizedUpgradeRows;
+        const normalizedOverlayPosition = normalizePosition(source.overlayPosition), overlayPosition = shouldMigrateOverlayDefaults && !normalizedOverlayPosition ? normalizePosition(defaultState.overlayPosition) : normalizedOverlayPosition;
+        const controlsPosition = normalizePosition(source.controlsPosition);
+        const timerVisible = shouldMigrateOverlayDefaults && source.timerVisible === false ? defaultState.timerVisible : Boolean(source.timerVisible);
+        const upgradeTooltipsVisible = sourceOverlayDefaultsVersion < 3 && source.upgradeTooltipsVisible === true ? defaultState.upgradeTooltipsVisible : Boolean(source.upgradeTooltipsVisible);
+        const valueWrapEnabled = sourceOverlayDefaultsVersion < 4 && source.valueWrapEnabled === false ? defaultState.valueWrapEnabled : Boolean(source.valueWrapEnabled);
+        const mapValue = normalizeCurrencyValue(source.mapValue, defaultState.mapValue), mapValueInitial = normalizeCurrencyValue(source.mapValueInitial, defaultState.mapValueInitial), mapValueGoal = normalizeCurrencyValue(source.mapValueGoal, defaultState.mapValueGoal), lostValue = normalizeCurrencyValue(source.lostValue, defaultState.lostValue);
+        const upgradeVisibility = normalizeUpgradeVisibility(source.upgradeVisibility), players = source.players && typeof source.players === "object" ? source.players : {};
+
+        return {
+            ...defaultState, ...source,
+            onlyMyUpgrades: source.onlyMyUpgrades !== undefined ? Boolean(source.onlyMyUpgrades) : true,
+            cursorVisible: Boolean(source.cursorVisible),
+            overlayScaleVersion: defaultState.overlayScaleVersion, columnsLayoutVersion: defaultState.columnsLayoutVersion, style: 1, squareSize, upgradeSize, columnsCount, overlayDefaultsVersion: defaultState.overlayDefaultsVersion,
+            hoverOpacity, interfaceLanguage, overlayAlignment, compactModeEnabled, upgradeLayout: compactModeEnabled ? "inline" : "stacked", upgradeRows, overlayPosition, controlsPosition, timerVisible, upgradeTooltipsVisible, valueWrapEnabled, upgradeVisibility,
+            players, monsters: Array.isArray(source.monsters) ? source.monsters : [], roster: Array.isArray(source.roster) ? source.roster : [], mapValue, mapValueInitial, mapValueGoal, lostValue
+        };
+    }
+
+    function normalizeUpgradeVisibility(rawVisibility) { const source = rawVisibility && typeof rawVisibility === "object" ? rawVisibility : {}; return upgradeKeys.reduce((acc, key) => { acc[key] = Object.prototype.hasOwnProperty.call(source, key) ? Boolean(source[key]) : true; return acc; }, {}); }
+    function normalizeCurrencyValue(value, fallback) { if (value === null && fallback === null) return null; const parsed = Number(value); if (!Number.isFinite(parsed)) return fallback; return Math.max(0, Math.round(parsed)); }
+    function normalizePosition(position) {
+        if (!position || typeof position !== "object") return null; const left = Number(position.left), top = Number(position.top); if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+        return { left: Math.max(0, Math.round(left)), top: Math.max(0, Math.round(top)), anchorX: ["left", "center", "right"].includes(position.anchorX) ? position.anchorX : null, anchorY: ["top", "center", "bottom"].includes(position.anchorY) ? position.anchorY : null };
+    }
+
+    function getState() { state = normalizeState(loadState()); return { ...state, monsters: [...state.monsters], roster: [...state.roster] }; }
+    function saveState(nextState, shouldBroadcast = true) { state = normalizeState(nextState); try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch { } listeners.forEach((listener) => listener(getState())); if (shouldBroadcast && channel) channel.postMessage(state); if (shouldBroadcast && serverSyncEnabled && serverSyncReady) postStateToServer(state); }
+    async function postStateToServer(nextState) { try { await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: nextState }) }); } catch { serverSyncReady = false; } }
+    async function initializeServerSync() {
+        if (!serverSyncEnabled) return;
+        try { const response = await fetch("/api/state", { cache: "no-store" }); if (!response.ok) return; serverSyncReady = true; const payload = await response.json(); if (payload.state) saveState(payload.state, false); else postStateToServer(getState()); } catch { serverSyncReady = false; return; }
+        if ("EventSource" in window) { const events = new EventSource("/api/events"); events.onmessage = (event) => { if (event.data) { try { saveState(JSON.parse(event.data), false); } catch { } } }; events.onerror = () => serverSyncReady = false; events.onopen = () => serverSyncReady = true; }
+    }
+    function updateState(updater) { const nextState = typeof updater === "function" ? updater(getState()) : updater; saveState(nextState); }
+    function subscribe(listener) { listeners.add(listener); listener(getState()); return () => listeners.delete(listener); }
+
+    if (channel) channel.addEventListener("message", (event) => saveState(event.data, false));
+    window.addEventListener("storage", (event) => { if (event.key === storageKey) listeners.forEach((listener) => listener(getState())); });
+
+    initializeServerSync();
+
+    function getCountsForLevel(level) { if (level <= 2) return levelMonsterCounts["1-2"]; if (level <= 5) return levelMonsterCounts["3-5"]; if (level <= 8) return levelMonsterCounts["6-8"]; if (level === 9) return levelMonsterCounts["9"]; if (level <= 19) return levelMonsterCounts["10-19"]; return levelMonsterCounts["20+"]; }
+    function getTimerSeconds(currentState) { return (!currentState.running || !currentState.startedAt) ? currentState.seconds : currentState.seconds + Math.floor((Date.now() - currentState.startedAt) / 1000); }
+    function formatTime(totalSeconds) { const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0)), hours = Math.floor(seconds / 3600), mins = Math.floor((seconds % 3600) / 60), secs = seconds % 60; if (hours > 0) return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`; return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`; }
+    function getMonsterFileName(monsterName) { const replacements = { peeper: "eye_monster", peepers: "eye_monster", "shadow child": "shadow_child", "shadow children": "shadow_child", gnomes: "gnome", "apex predator": "apex_predator", "apex predators": "apex_predator", chef: "chef_frog", chefs: "chef_frog", clown: "clown_beamer", animals: "animal", upscreams: "upscream", bowties: "bowtie", mentalists: "mentalist", spewers: "spewer", bangers: "banger" }; const key = monsterName.toLowerCase(); return replacements[key] || key; }
+    function getMonsterImage(monsterName) { return `assets/monsters/${getMonsterFileName(monsterName)}.webp`; }
+    function getMonsterCount(monsterName, level, isReplacement = false) { if (monsterName === "Gnomes" && level !== 3) return 4; if ((monsterName === "Bangers" || monsterName === "Banger") && level === 2) return 3; if (level !== 3 || !isReplacement) return null; if (["Animals", "Upscreams", "Bowties", "Rugrat", "Mentalists", "Peepers", "Chefs"].includes(monsterName)) return 3; if (monsterName === "Hidden") return 2; if (["Apex Predators", "Spewers", "Shadow Children"].includes(monsterName)) return 4; if (monsterName === "Bangers") return 6; if (monsterName === "Gnomes") return 10; if (["Bella", "Birthday Boy", "Elsa", "Headgrab", "Tick"].includes(monsterName)) return 3; if (["Gambit", "Heart Hugger", "Oogly"].includes(monsterName)) return 2; return null; }
+    function getMonsterStrength(monsterName) { if (monsterConfig.strength[monsterName] !== undefined) return monsterConfig.strength[monsterName]; if (monsterName.endsWith("s")) return monsterConfig.strength[monsterName.slice(0, -1)]; return undefined; }
+    function createMonsterEntry(monsterName, level, isReplacement = false) { return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, level, name: monsterName, image: getMonsterImage(monsterName), count: getMonsterCount(monsterName, level, isReplacement), strength: getMonsterStrength(monsterName) }; }
+
+    function setLevel(level) { updateState((currentState) => ({ ...currentState, level, seconds: 0, running: false, startedAt: null, monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0 })); }
+    function setStrength(strength) { updateState((currentState) => ({ ...currentState, strength })); }
+    function setUpgradeVisibility(upgradeKey, isVisible) { updateState((currentState) => ({ ...currentState, upgradeVisibility: { ...currentState.upgradeVisibility, [upgradeKey]: Boolean(isVisible) } })); }
+    function setTumbleLaunch(tumbleLaunch) { updateState((currentState) => ({ ...currentState, tumbleLaunch })); }
+    function startTimer() { updateState((currentState) => currentState.running ? currentState : { ...currentState, running: true, startedAt: Date.now() }); }
+    function stopTimer() { updateState((currentState) => ({ ...currentState, seconds: getTimerSeconds(currentState), running: false, startedAt: null })); }
+    function resetTimer() { updateState((currentState) => ({ ...currentState, seconds: 0, running: false, startedAt: null })); }
+    function addMonster(monsterName, level, isReplacement = false) { updateState((currentState) => { const counts = getCountsForLevel(currentState.level); if (currentState.monsters.filter((m) => m.level === level).length >= counts[`level${level}`]) return currentState; return { ...currentState, monsters: [...currentState.monsters, createMonsterEntry(monsterName, level, isReplacement)] }; }); }
+    function removeMonster(monsterName, level) { updateState((currentState) => { const index = currentState.monsters.findIndex((m) => m.level === level && m.name === monsterName); if (index === -1) return currentState; return { ...currentState, monsters: currentState.monsters.filter((_, i) => i !== index) }; }); }
+    function setStyle(style) { updateState((currentState) => ({ ...currentState, style: 1 })); }
+    function setInterfaceLanguage(interfaceLanguage) { updateState((currentState) => ({ ...currentState, interfaceLanguage: interfaceLanguage === "en" ? "en" : "ru" })); }
+    function setBgEnabled(bgEnabled) { updateState((currentState) => ({ ...currentState, bgEnabled })); }
+    function setTimerVisible(timerVisible) { updateState((currentState) => ({ ...currentState, timerVisible })); }
+    function setUpgradesVisible(upgradesVisible) { updateState((currentState) => ({ ...currentState, upgradesVisible })); }
+    function setUpgradeLayout(upgradeLayout) { updateState((currentState) => ({ ...currentState, compactModeEnabled: upgradeLayout === "inline", upgradeLayout: upgradeLayout === "inline" ? "inline" : "stacked" })); }
+    function setCompactModeEnabled(compactModeEnabled) { updateState((currentState) => ({ ...currentState, compactModeEnabled: Boolean(compactModeEnabled), upgradeLayout: compactModeEnabled ? "inline" : "stacked" })); }
+    function setUpgradeRows(upgradeRows) { updateState((currentState) => ({ ...currentState, upgradeRows: upgradeRows === "double" ? "double" : "single" })); }
+    function setMapValueVisible(mapValueVisible) { updateState((currentState) => ({ ...currentState, mapValueVisible })); }
+    function setLostValueVisible(lostValueVisible) { updateState((currentState) => ({ ...currentState, lostValueVisible })); }
+    function setValueWrapEnabled(valueWrapEnabled) { updateState((currentState) => ({ ...currentState, valueWrapEnabled: Boolean(valueWrapEnabled) })); }
+    function setMonsterIconsVisible(monsterIconsVisible) { updateState((currentState) => ({ ...currentState, monsterIconsVisible })); }
+    function setLevelBadgeVisible(levelBadgeVisible) { updateState((currentState) => ({ ...currentState, levelBadgeVisible })); }
+    function setUpgradeTooltipsVisible(upgradeTooltipsVisible) { updateState((currentState) => ({ ...currentState, upgradeTooltipsVisible })); }
+    function setMonsterHealthBarsVisible(monsterHealthBarsVisible) { updateState((currentState) => ({ ...currentState, monsterHealthBarsVisible })); }
+    function setMonsterProximityWavesVisible(monsterProximityWavesVisible) { updateState((currentState) => ({ ...currentState, monsterProximityWavesVisible })); }
+    function setMonsterStrengthVisible(monsterStrengthVisible) { updateState((currentState) => ({ ...currentState, monsterStrengthVisible })); }
+    function setRespawnTimerVisible(respawnTimerVisible) { updateState((currentState) => ({ ...currentState, respawnTimerVisible })); }
+    function setRespawnIndicatorVisible(respawnIndicatorVisible) { updateState((currentState) => ({ ...currentState, respawnIndicatorVisible })); }
+    function setOnlyAliveMonstersVisible(onlyAliveMonstersVisible) { updateState((currentState) => ({ ...currentState, onlyAliveMonstersVisible: Boolean(onlyAliveMonstersVisible) })); }
+    function setOnlyAliveIncludeUndetected(onlyAliveIncludeUndetected) { updateState((currentState) => ({ ...currentState, onlyAliveIncludeUndetected: Boolean(onlyAliveIncludeUndetected) })); }
+    function setSquareSize(squareSize) { updateState((currentState) => ({ ...currentState, squareSize })); }
+    function setUpgradeSize(upgradeSize) { updateState((currentState) => ({ ...currentState, upgradeSize })); }
+    function setColumnsCount(columnsCount) { updateState((currentState) => ({ ...currentState, columnsCount })); }
+    function setHoverOpacity(hoverOpacity) { updateState((currentState) => ({ ...currentState, hoverOpacity })); }
+    function setOverlayAlignment(overlayAlignment) { updateState((currentState) => ({ ...currentState, overlayAlignment: ["left", "center", "right"].includes(overlayAlignment) ? overlayAlignment : defaultState.overlayAlignment })); }
+    function setOverlayPosition(overlayPosition) { updateState((currentState) => ({ ...currentState, overlayPosition: normalizePosition(overlayPosition) })); }
+    function setControlsPosition(controlsPosition) { updateState((currentState) => ({ ...currentState, controlsPosition: normalizePosition(controlsPosition) })); }
+    function setOnlyMyUpgrades(onlyMyUpgrades) { updateState((currentState) => ({ ...currentState, onlyMyUpgrades: Boolean(onlyMyUpgrades) })); }
+
+    return {
+        monsterConfig, upgradeKeys, addMonster, formatTime, getCountsForLevel, getMonsterCount, getMonsterImage, getState,
+        getTimerSeconds, removeMonster, resetTimer, setBgEnabled, setCompactModeEnabled, setColumnsCount, setHoverOpacity,
+        setControlsPosition, setInterfaceLanguage, setLevel, setLevelBadgeVisible, setLostValueVisible, setValueWrapEnabled,
+        setMapValueVisible, setMonsterIconsVisible, setMonsterHealthBarsVisible, setMonsterProximityWavesVisible,
+        setMonsterStrengthVisible, setOverlayAlignment, setOverlayPosition, setSquareSize, setStrength, setTumbleLaunch,
+        setStyle, setTimerVisible, setUpgradeLayout, setUpgradeRows, setUpgradeTooltipsVisible, setUpgradeSize,
+        setUpgradesVisible, setUpgradeVisibility, setRespawnTimerVisible, setRespawnIndicatorVisible,
+        setOnlyAliveMonstersVisible, setOnlyAliveIncludeUndetected, setOnlyMyUpgrades, startTimer, stopTimer, subscribe
+    };
+})();
