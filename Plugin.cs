@@ -120,7 +120,6 @@ namespace OverlayHUD
         private bool gameplayActive;
         private Coroutine pendingGameplayActivation;
 
-        // ПЕРЕМЕННЫЕ ДЛЯ АНТИ-МЕРЦАНИЯ КУРСОРА
         private bool wasCursorVisible = false;
         private bool pendingCursorState = false;
         private float cursorStateChangeTime = 0f;
@@ -140,7 +139,6 @@ namespace OverlayHUD
             scanInterval = Config.Bind("Detection", "ScanIntervalSeconds", 3f, "How often pending enemy roster sync is retried.");
             statusInterval = Config.Bind("Detection", "StatusIntervalSeconds", 10f, "How often monster health/respawn sync is retried.");
 
-            // ПРИНУДИТЕЛЬНО ВКЛЮЧАЕМ ЗНАКИ ВОПРОСА
             requireLineOfSight = Config.Bind("Detection", "RequireLineOfSight", true, "Reveal monsters only after an encounter.");
             requireLineOfSight.Value = true;
             Config.Save();
@@ -285,14 +283,21 @@ namespace OverlayHUD
 
         private void Update()
         {
-            if (!gameplayActive) return;
+            if (!gameplayActive)
+            {
+                // ЗАЩИТА ДЛЯ КЛИЕНТОВ: если сцена уже загружена, но оверлей спит
+                if (pendingGameplayActivation == null && IsRunLevelName(SceneManager.GetActiveScene().name))
+                {
+                    ScheduleGameplayActivation("Client update fallback");
+                }
+                return;
+            }
 
-            // АНТИ-МЕРЦАНИЕ КУРСОРОВ И ВЫЗОВ МЕНЮ ТОЛЬКО ПРИ ESC
             bool isCursorVisible = Cursor.visible;
             if (isCursorVisible != pendingCursorState)
             {
                 pendingCursorState = isCursorVisible;
-                cursorStateChangeTime = Time.unscaledTime + 0.3f; // Ждем 300мс перед сменой состояния меню
+                cursorStateChangeTime = Time.unscaledTime + 0.3f;
             }
             if (pendingCursorState != wasCursorVisible && Time.unscaledTime >= cursorStateChangeTime)
             {
@@ -340,6 +345,11 @@ namespace OverlayHUD
             if (__instance is Component component)
             {
                 RegisterEnemyParent(component);
+                if (instance != null)
+                {
+                    GameObject root = GetEnemyRoot(component);
+                    if (root != null) instance.clientSimulatedHealth.Remove(root.GetInstanceID());
+                }
                 instance?.SyncEnemyParentStatusChanged(component);
             }
         }
@@ -461,7 +471,10 @@ namespace OverlayHUD
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            if (gameplayActive && !IsRunLevel() && !IsRunLevelName(scene.name)) HandleLevelChanging();
+            if (gameplayActive && !IsRunLevel() && !IsRunLevelName(scene.name))
+                HandleLevelChanging();
+            else if (!gameplayActive && (IsRunLevel() || IsRunLevelName(scene.name)))
+                ScheduleGameplayActivation("Scene loaded");
         }
 
         private void ScheduleGameplayActivation(string reason)
@@ -477,7 +490,6 @@ namespace OverlayHUD
                 yield return new WaitForSecondsRealtime(0.25f);
                 if (IsGameplayLevelCandidate(out _))
                 {
-                    // ЗАДЕРЖКА ПОЯВЛЕНИЯ ОВЕРЛЕЯ (5 СЕКУНД)
                     yield return new WaitForSecondsRealtime(5f);
                     HandleGameplayDetected(reason);
                     pendingGameplayActivation = null;
@@ -674,21 +686,17 @@ namespace OverlayHUD
                 {
                     if (IsMasterClientOrSingleplayer())
                     {
-                        // Хост: таймер тикает сам внутри игры, просто доверяем ему
                         remaining = realTimer > 0f ? realTimer : 60f;
                         instance.clientSimulatedTimers[id] = remaining;
                     }
                     else
                     {
-                        // Клиент: таймер зависает на стартовом значении, берем управление на себя
                         if (!instance.clientSimulatedTimers.TryGetValue(id, out float sim))
                         {
-                            // При первой смерти берем значение от хоста или дефолтные 60 сек
                             instance.clientSimulatedTimers[id] = realTimer > 0f ? realTimer : 60f;
                         }
                         else if (realTimer > 0f && realTimer < sim - 2f)
                         {
-                            // Если хост прислал резкое сокращение таймера (админ или перк) — синхронизируемся
                             instance.clientSimulatedTimers[id] = realTimer;
                         }
 
@@ -716,19 +724,6 @@ namespace OverlayHUD
         {
             if (!gameplayActive || enemyHealthSource == null) return;
             Component enemyParent = ReadMember(ReadMember(enemyHealthSource, "enemy") as Component, "EnemyParent") as Component;
-
-            if (enemyParent != null)
-            {
-                GameObject root = GetEnemyRoot(enemyParent);
-                if (root != null)
-                {
-                    int id = root.GetInstanceID();
-                    if (clientSimulatedHealth.ContainsKey(id))
-                    {
-                        clientSimulatedHealth.Remove(id);
-                    }
-                }
-            }
 
             SyncEnemyParentStatusChanged(enemyParent);
         }
@@ -805,10 +800,17 @@ namespace OverlayHUD
             if (candidate.Root != null)
             {
                 int id = candidate.Root.GetInstanceID();
-                if (clientSimulatedHealth.TryGetValue(id, out float simH) && simH < health)
+                if (clientSimulatedHealth.TryGetValue(id, out float simH))
                 {
-                    health = simH;
-                    hasHealth = true;
+                    if (hasHealth && health < simH)
+                    {
+                        clientSimulatedHealth[id] = health;
+                    }
+                    else
+                    {
+                        health = simH;
+                        hasHealth = true;
+                    }
                 }
             }
 
