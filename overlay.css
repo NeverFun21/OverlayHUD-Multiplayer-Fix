@@ -1906,10 +1906,3 @@ body {
     line-height: 1;
     margin-bottom: 2px;
 }
-
-/* Принудительно открываем меню, когда в игре активен курсор (Esc, терминал) */
-.overlay-hover-controls.is-cursor-visible .overlay-control-panel {
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    transform: translateY(0) scale(1) !important;
-}

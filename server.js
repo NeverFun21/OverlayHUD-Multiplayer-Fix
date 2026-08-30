@@ -10,7 +10,6 @@ const clients = new Set();
 let overlayState = null;
 let timestampSession = null;
 const proximityBySourceId = new Map();
-let lastMenuToggleTime = 0; // Таймер для защиты от двойного нажатия
 
 const monsterConfig = {
     levels: {
@@ -19,20 +18,78 @@ const monsterConfig = {
         3: ["Headman", "Robe", "Huntsman", "Reaper", "Clown", "Trudge", "Cleanup Crew", "Loom"]
     },
     strength: {
-        Banger: 0, Gnome: 0, Gnomes: 0, Animal: 4, "Birthday Boy": 4, Headgrab: 4, Mentalist: 4, Hidden: 4,
-        Rugrat: 4, Spewer: 4, Upscream: 4, Bowtie: 7, Bella: 9, Chef: 9, Gambit: 9, "Heart Hugger": 9,
-        Huntsman: 9, Oogly: 9, Reaper: 9, "Shadow Child": 9, "Cleanup Crew": 13, Clown: 13, Headman: 13,
-        Loom: 13, Robe: 13, Trudge: 13, "Apex Predator": "impossible", Elsa: "impossible", Peeper: "impossible", Tick: "impossible"
+        Banger: 0,
+        Gnome: 0,
+        Gnomes: 0,
+        Animal: 4,
+        "Birthday Boy": 4,
+        Headgrab: 4,
+        Mentalist: 4,
+        Hidden: 4,
+        Rugrat: 4,
+        Spewer: 4,
+        Upscream: 4,
+        Bowtie: 7,
+        Bella: 9,
+        Chef: 9,
+        Gambit: 9,
+        "Heart Hugger": 9,
+        Huntsman: 9,
+        Oogly: 9,
+        Reaper: 9,
+        "Shadow Child": 9,
+        "Cleanup Crew": 13,
+        Clown: 13,
+        Headman: 13,
+        Loom: 13,
+        Robe: 13,
+        Trudge: 13,
+        "Apex Predator": "impossible",
+        Elsa: "impossible",
+        Peeper: "impossible",
+        Tick: "impossible"
     },
     aliases: {
-        apexpredator: "Apex Predator", animal: "Animal", animals: "Animals", banger: "Banger", bangers: "Bangers",
-        bella: "Bella", birthdayboy: "Birthday Boy", bowtie: "Bowtie", bowties: "Bowties", chef: "Chef", cheffrog: "Chef",
-        chefs: "Chefs", cleanupcrew: "Cleanup Crew", clown: "Clown", clownbeamer: "Clown", elsa: "Elsa", gambit: "Gambit",
-        gnome: "Gnomes", gnomes: "Gnomes", headgrab: "Headgrab", headman: "Headman", hearthugger: "Heart Hugger",
-        hidden: "Hidden", huntsman: "Huntsman", loom: "Loom", mentalist: "Mentalist", mentalists: "Mentalists",
-        oogly: "Oogly", peeper: "Peeper", peepers: "Peepers", reaper: "Reaper", robe: "Robe", rugrat: "Rugrat",
-        shadowchild: "Shadow Child", spewer: "Spewer", spewers: "Spewers", tick: "Tick", trudge: "Trudge",
-        upscream: "Upscream", upscreams: "Upscreams"
+        apexpredator: "Apex Predator",
+        animal: "Animal",
+        animals: "Animals",
+        banger: "Banger",
+        bangers: "Bangers",
+        bella: "Bella",
+        birthdayboy: "Birthday Boy",
+        bowtie: "Bowtie",
+        bowties: "Bowties",
+        chef: "Chef",
+        cheffrog: "Chef",
+        chefs: "Chefs",
+        cleanupcrew: "Cleanup Crew",
+        clown: "Clown",
+        clownbeamer: "Clown",
+        elsa: "Elsa",
+        gambit: "Gambit",
+        gnome: "Gnomes",
+        gnomes: "Gnomes",
+        headgrab: "Headgrab",
+        headman: "Headman",
+        hearthugger: "Heart Hugger",
+        hidden: "Hidden",
+        huntsman: "Huntsman",
+        loom: "Loom",
+        mentalist: "Mentalist",
+        mentalists: "Mentalists",
+        oogly: "Oogly",
+        peeper: "Peeper",
+        peepers: "Peepers",
+        reaper: "Reaper",
+        robe: "Robe",
+        rugrat: "Rugrat",
+        shadowchild: "Shadow Child",
+        spewer: "Spewer",
+        spewers: "Spewers",
+        tick: "Tick",
+        trudge: "Trudge",
+        upscream: "Upscream",
+        upscreams: "Upscreams"
     }
 };
 
@@ -46,38 +103,94 @@ const levelMonsterCounts = {
 };
 
 const defaultPlayerUpgrades = {
-    strength: 0, tumbleLaunch: 0, range: 0, sprintSpeed: 0, tumbleWings: 0,
-    crouchRest: 0, extraJump: 0, tumbleClimb: 0, health: 0, stamina: 0,
-    mapPlayerCount: 0, deathHeadBattery: 0
+    strength: 0,
+    tumbleLaunch: 0,
+    range: 0,
+    sprintSpeed: 0,
+    tumbleWings: 0,
+    crouchRest: 0,
+    extraJump: 0,
+    tumbleClimb: 0,
+    health: 0,
+    stamina: 0,
+    mapPlayerCount: 0,
+    deathHeadBattery: 0
 };
 
 const allUpgradeKeys = Object.keys(defaultPlayerUpgrades);
+
 const defaultUpgradeVisibility = allUpgradeKeys.reduce((accumulator, key) => {
-    accumulator[key] = (key !== "health" && key !== "stamina");
+    accumulator[key] = true;
     return accumulator;
 }, {});
 
 const defaultOverlayState = {
-    level: 1, gameplayVisible: false, tabHidden: false, cursorVisible: false, players: {},
-    upgradeVisibility: { ...defaultUpgradeVisibility }, style: 1, interfaceLanguage: "ru",
-    bgEnabled: false, timerVisible: true, upgradesVisible: true, upgradeLayout: "inline",
-    compactModeEnabled: true, upgradeRows: "double", mapValueVisible: true, lostValueVisible: true,
-    valueWrapEnabled: true, monsterIconsVisible: true, levelBadgeVisible: true,
-    upgradeTooltipsVisible: false, monsterHealthBarsVisible: true, monsterProximityWavesVisible: true,
-    monsterStrengthVisible: true, respawnTimerVisible: true, respawnIndicatorVisible: true,
-    onlyAliveMonstersVisible: false, onlyAliveIncludeUndetected: false, squareSize: 70, upgradeSize: 38,
-    overlayScaleVersion: 3, columnsCount: 11, columnsLayoutVersion: 2, overlayDefaultsVersion: 4,
-    overlayAlignment: "center", overlayPosition: { left: 0, top: 0, anchorX: "center", anchorY: "top" },
-    controlsPosition: null, hoverOpacity: 50, seconds: 0, running: false, startedAt: null,
-    monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0
+    level: 1,
+    gameplayVisible: false,
+    tabHidden: false,
+    players: {}, // Добавлено: здесь будут храниться данные всех игроков по steamID
+    upgradeVisibility: { ...defaultUpgradeVisibility },
+    style: 1,
+    interfaceLanguage: "ru",
+    bgEnabled: false,
+// ... дальше без изменений до конца объекта
+    timerVisible: true,
+    upgradesVisible: true,
+    upgradeLayout: "inline",
+    compactModeEnabled: true,
+    upgradeRows: "double",
+    mapValueVisible: true,
+    lostValueVisible: true,
+    valueWrapEnabled: true,
+    monsterIconsVisible: true,
+    levelBadgeVisible: true,
+    upgradeTooltipsVisible: false,
+    monsterHealthBarsVisible: true,
+    monsterProximityWavesVisible: true,
+    monsterStrengthVisible: true,
+    respawnTimerVisible: true,
+    respawnIndicatorVisible: true,
+    onlyAliveMonstersVisible: false,
+    onlyAliveIncludeUndetected: false,
+    squareSize: 70,
+    upgradeSize: 38,
+    overlayScaleVersion: 3,
+    columnsCount: 11,
+    columnsLayoutVersion: 2,
+    overlayDefaultsVersion: 4,
+    overlayAlignment: "center",
+    overlayPosition: { left: 0, top: 0, anchorX: "center", anchorY: "top" },
+    controlsPosition: null,
+    hoverOpacity: 50,
+    seconds: 0,
+    running: false,
+    startedAt: null,
+    monsters: [],
+    roster: [],
+    rosterPending: false,
+    mapValue: 0,
+    mapValueInitial: 0,
+    mapValueGoal: null,
+    lostValue: 0
 };
 
-const levelNameAliases = { swiftbroomacademy: "Wizard", wizard: "Wizard", macjannekstation: "Arctic", arctic: "Arctic", headmanmanor: "Manor", manor: "Manor", museumofhumanarts: "Museum", museum: "Museum" };
+const levelNameAliases = {
+    swiftbroomacademy: "Wizard",
+    wizard: "Wizard",
+    macjannekstation: "Arctic",
+    arctic: "Arctic",
+    headmanmanor: "Manor",
+    manor: "Manor",
+    museumofhumanarts: "Museum",
+    museum: "Museum"
+};
+
 const respawnReductionFlashThresholdSeconds = 2.5;
 const respawnReductionFlashDurationMs = 1100;
 
 function normalizeOverlayState(rawState) {
     if (!rawState) return null;
+
     const source = { ...defaultOverlayState, ...rawState };
     const sourceSquareSize = Number(source.squareSize);
     const sourceUpgradeSize = Number(source.upgradeSize);
@@ -86,39 +199,89 @@ function normalizeOverlayState(rawState) {
     const shouldMigrateOverlayDefaults = sourceOverlayDefaultsVersion < 2;
     const shouldMigrateTooltipDefault = sourceOverlayDefaultsVersion < 3;
     const shouldMigrateValueWrapDefault = sourceOverlayDefaultsVersion < 4;
-    const squareSize = Number.isFinite(sourceSquareSize) ? (shouldMigrateDefaultSizes && (sourceSquareSize === 50 || sourceSquareSize === 64) ? defaultOverlayState.squareSize : sourceSquareSize) : defaultOverlayState.squareSize;
-    const upgradeSize = Number.isFinite(sourceUpgradeSize) ? (shouldMigrateDefaultSizes && sourceUpgradeSize === 32 ? defaultOverlayState.upgradeSize : sourceUpgradeSize) : defaultOverlayState.upgradeSize;
+    const squareSize = Number.isFinite(sourceSquareSize)
+        ? (shouldMigrateDefaultSizes && (sourceSquareSize === 50 || sourceSquareSize === 64) ? defaultOverlayState.squareSize : sourceSquareSize)
+        : defaultOverlayState.squareSize;
+    const upgradeSize = Number.isFinite(sourceUpgradeSize)
+        ? (shouldMigrateDefaultSizes && sourceUpgradeSize === 32 ? defaultOverlayState.upgradeSize : sourceUpgradeSize)
+        : defaultOverlayState.upgradeSize;
     const sourceColumnsCount = Number(source.columnsCount);
-    const columnsCount = Number.isFinite(sourceColumnsCount) ? (shouldMigrateOverlayDefaults && sourceColumnsCount === 7 ? defaultOverlayState.columnsCount : sourceColumnsCount) : defaultOverlayState.columnsCount;
-    const hoverOpacity = Number.isFinite(Number(source.hoverOpacity)) ? Math.min(100, Math.max(20, Number(source.hoverOpacity))) : defaultOverlayState.hoverOpacity;
+    const columnsCount = Number.isFinite(sourceColumnsCount)
+        ? (shouldMigrateOverlayDefaults && sourceColumnsCount === 7 ? defaultOverlayState.columnsCount : sourceColumnsCount)
+        : defaultOverlayState.columnsCount;
+    const hoverOpacity = Number.isFinite(Number(source.hoverOpacity))
+        ? Math.min(100, Math.max(20, Number(source.hoverOpacity)))
+        : defaultOverlayState.hoverOpacity;
     const interfaceLanguage = source.interfaceLanguage === "en" ? "en" : defaultOverlayState.interfaceLanguage;
-    const normalizedOverlayAlignment = ["left", "center", "right"].includes(source.overlayAlignment) ? source.overlayAlignment : defaultOverlayState.overlayAlignment;
-    const overlayAlignment = shouldMigrateOverlayDefaults && normalizedOverlayAlignment === "left" ? defaultOverlayState.overlayAlignment : normalizedOverlayAlignment;
+    const normalizedOverlayAlignment = ["left", "center", "right"].includes(source.overlayAlignment)
+        ? source.overlayAlignment
+        : defaultOverlayState.overlayAlignment;
+    const overlayAlignment = shouldMigrateOverlayDefaults && normalizedOverlayAlignment === "left"
+        ? defaultOverlayState.overlayAlignment
+        : normalizedOverlayAlignment;
     const hasCompactModeEnabled = Object.prototype.hasOwnProperty.call(rawState, "compactModeEnabled");
-    const normalizedCompactModeEnabled = hasCompactModeEnabled && typeof source.compactModeEnabled === "boolean" ? source.compactModeEnabled : source.upgradeLayout === "inline";
-    const compactModeEnabled = shouldMigrateOverlayDefaults && !normalizedCompactModeEnabled && source.upgradeLayout !== "inline" ? defaultOverlayState.compactModeEnabled : normalizedCompactModeEnabled;
-    const normalizedUpgradeRows = ["single", "double"].includes(source.upgradeRows) ? source.upgradeRows : defaultOverlayState.upgradeRows;
-    const upgradeRows = shouldMigrateOverlayDefaults && normalizedUpgradeRows === "single" ? defaultOverlayState.upgradeRows : normalizedUpgradeRows;
+    const normalizedCompactModeEnabled = hasCompactModeEnabled && typeof source.compactModeEnabled === "boolean"
+        ? source.compactModeEnabled
+        : source.upgradeLayout === "inline";
+    const compactModeEnabled = shouldMigrateOverlayDefaults && !normalizedCompactModeEnabled && source.upgradeLayout !== "inline"
+        ? defaultOverlayState.compactModeEnabled
+        : normalizedCompactModeEnabled;
+    const normalizedUpgradeRows = ["single", "double"].includes(source.upgradeRows)
+        ? source.upgradeRows
+        : defaultOverlayState.upgradeRows;
+    const upgradeRows = shouldMigrateOverlayDefaults && normalizedUpgradeRows === "single"
+        ? defaultOverlayState.upgradeRows
+        : normalizedUpgradeRows;
     const normalizedOverlayPosition = normalizePosition(source.overlayPosition);
-    const overlayPosition = shouldMigrateOverlayDefaults && !normalizedOverlayPosition ? normalizePosition(defaultOverlayState.overlayPosition) : normalizedOverlayPosition;
+    const overlayPosition = shouldMigrateOverlayDefaults && !normalizedOverlayPosition
+        ? normalizePosition(defaultOverlayState.overlayPosition)
+        : normalizedOverlayPosition;
     const controlsPosition = normalizePosition(source.controlsPosition);
-    const timerVisible = shouldMigrateOverlayDefaults && source.timerVisible === false ? defaultOverlayState.timerVisible : Boolean(source.timerVisible);
-    const upgradeTooltipsVisible = shouldMigrateTooltipDefault && source.upgradeTooltipsVisible === true ? defaultOverlayState.upgradeTooltipsVisible : Boolean(source.upgradeTooltipsVisible);
-    const valueWrapEnabled = shouldMigrateValueWrapDefault && source.valueWrapEnabled === false ? defaultOverlayState.valueWrapEnabled : Boolean(source.valueWrapEnabled);
+    const timerVisible = shouldMigrateOverlayDefaults && source.timerVisible === false
+        ? defaultOverlayState.timerVisible
+        : Boolean(source.timerVisible);
+    const upgradeTooltipsVisible = shouldMigrateTooltipDefault && source.upgradeTooltipsVisible === true
+        ? defaultOverlayState.upgradeTooltipsVisible
+        : Boolean(source.upgradeTooltipsVisible);
+    const valueWrapEnabled = shouldMigrateValueWrapDefault && source.valueWrapEnabled === false
+        ? defaultOverlayState.valueWrapEnabled
+        : Boolean(source.valueWrapEnabled);
     const mapValue = normalizeCurrencyValue(source.mapValue, defaultOverlayState.mapValue);
     const mapValueInitial = normalizeCurrencyValue(source.mapValueInitial, defaultOverlayState.mapValueInitial);
     const mapValueGoal = normalizeCurrencyValue(source.mapValueGoal, defaultOverlayState.mapValueGoal);
+    // ... внутри normalizeOverlayState
     const lostValue = normalizeCurrencyValue(source.lostValue, defaultOverlayState.lostValue);
     const upgradeVisibility = normalizeUpgradeVisibility(source.upgradeVisibility);
     const players = source.players && typeof source.players === "object" ? source.players : {};
 
     return {
-        ...source, style: 1, squareSize, upgradeSize, overlayScaleVersion: defaultOverlayState.overlayScaleVersion,
-        columnsCount, columnsLayoutVersion: defaultOverlayState.columnsLayoutVersion, overlayDefaultsVersion: defaultOverlayState.overlayDefaultsVersion,
-        hoverOpacity, interfaceLanguage, overlayAlignment, compactModeEnabled, upgradeLayout: compactModeEnabled ? "inline" : "stacked",
-        upgradeRows, overlayPosition, controlsPosition, timerVisible, upgradeTooltipsVisible, valueWrapEnabled, upgradeVisibility,
-        players, monsters: Array.isArray(source.monsters) ? source.monsters : [], roster: Array.isArray(source.roster) ? source.roster : [],
-        mapValue, mapValueInitial, mapValueGoal, lostValue
+        ...source,
+        style: 1,
+        squareSize,
+        upgradeSize,
+        overlayScaleVersion: defaultOverlayState.overlayScaleVersion,
+        columnsCount,
+        columnsLayoutVersion: defaultOverlayState.columnsLayoutVersion,
+        overlayDefaultsVersion: defaultOverlayState.overlayDefaultsVersion,
+        hoverOpacity,
+        interfaceLanguage,
+        overlayAlignment,
+        compactModeEnabled,
+        upgradeLayout: compactModeEnabled ? "inline" : "stacked",
+        upgradeRows,
+        overlayPosition,
+        controlsPosition,
+        timerVisible,
+        upgradeTooltipsVisible,
+        valueWrapEnabled,
+        upgradeVisibility,
+        players, // Добавлено
+        monsters: Array.isArray(source.monsters) ? source.monsters : [],
+        roster: Array.isArray(source.roster) ? source.roster : [],
+        mapValue,
+        mapValueInitial,
+        mapValueGoal,
+        lostValue
     };
 }
 
@@ -131,27 +294,55 @@ function normalizeCurrencyValue(value, fallback) {
 
 function normalizeUpgradeVisibility(rawVisibility) {
     const source = rawVisibility && typeof rawVisibility === "object" ? rawVisibility : {};
-    return allUpgradeKeys.reduce((accumulator, key) => { accumulator[key] = Object.prototype.hasOwnProperty.call(source, key) ? Boolean(source[key]) : true; return accumulator; }, {});
+    return allUpgradeKeys.reduce((accumulator, key) => {
+        accumulator[key] = Object.prototype.hasOwnProperty.call(source, key) ? Boolean(source[key]) : true;
+        return accumulator;
+    }, {});
 }
 
 function normalizePosition(position) {
     if (!position || typeof position !== "object") return null;
-    const left = Number(position.left), top = Number(position.top);
+    const left = Number(position.left);
+    const top = Number(position.top);
     if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
-    return { left: Math.max(0, Math.round(left)), top: Math.max(0, Math.round(top)), anchorX: ["left", "center", "right"].includes(position.anchorX) ? position.anchorX : null, anchorY: ["top", "center", "bottom"].includes(position.anchorY) ? position.anchorY : null };
+    return {
+        left: Math.max(0, Math.round(left)),
+        top: Math.max(0, Math.round(top)),
+        anchorX: ["left", "center", "right"].includes(position.anchorX) ? position.anchorX : null,
+        anchorY: ["top", "center", "bottom"].includes(position.anchorY) ? position.anchorY : null
+    };
 }
 
-const mimeTypes = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".ttf": "font/ttf", ".otf": "font/otf", ".png": "image/png", ".ico": "image/x-icon", ".webp": "image/webp" };
+const mimeTypes = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".webp": "image/webp"
+};
 
 function sendJson(response, statusCode, payload) {
-    response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    response.writeHead(statusCode, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store"
+    });
     response.end(JSON.stringify(payload));
 }
 
 function readBody(request) {
     return new Promise((resolve, reject) => {
         let body = "";
-        request.on("data", (chunk) => { body += chunk; if (body.length > 1024 * 1024) { request.destroy(); reject(new Error("Request body is too large")); } });
+        request.on("data", (chunk) => {
+            body += chunk;
+            if (body.length > 1024 * 1024) {
+                request.destroy();
+                reject(new Error("Request body is too large"));
+            }
+        });
         request.on("end", () => resolve(body));
         request.on("error", reject);
     });
@@ -159,7 +350,9 @@ function readBody(request) {
 
 function broadcastState() {
     const data = `data: ${JSON.stringify(getNormalizedOverlayState())}\n\n`;
-    for (const client of clients) client.write(data);
+    for (const client of clients) {
+        client.write(data);
+    }
 }
 
 function getNormalizedOverlayState() {
@@ -167,14 +360,57 @@ function getNormalizedOverlayState() {
     return overlayState;
 }
 
-function normalizeMonsterKey(name) { return String(name || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
-function normalizeMonsterName(name) { const key = normalizeMonsterKey(name); return monsterConfig.aliases[key] || null; }
-function getCountsForLevel(level) { if (level <= 2) return levelMonsterCounts["1-2"]; if (level <= 5) return levelMonsterCounts["3-5"]; if (level <= 8) return levelMonsterCounts["6-8"]; if (level === 9) return levelMonsterCounts["9"]; if (level <= 19) return levelMonsterCounts["10-19"]; return levelMonsterCounts["20+"]; }
-function normalizeLevel(value) { const level = Number(value); if (!Number.isFinite(level) || level < 1) return null; return Math.floor(level); }
-function getMonsterLevel(monsterName) { for (let level = 1; level <= 3; level++) { if (monsterConfig.levels[level].includes(monsterName)) return level; } return 3; }
+function normalizeMonsterKey(name) {
+    return String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeMonsterName(name) {
+    const key = normalizeMonsterKey(name);
+    return monsterConfig.aliases[key] || null;
+}
+
+function getCountsForLevel(level) {
+    if (level <= 2) return levelMonsterCounts["1-2"];
+    if (level <= 5) return levelMonsterCounts["3-5"];
+    if (level <= 8) return levelMonsterCounts["6-8"];
+    if (level === 9) return levelMonsterCounts["9"];
+    if (level <= 19) return levelMonsterCounts["10-19"];
+    return levelMonsterCounts["20+"];
+}
+
+function normalizeLevel(value) {
+    const level = Number(value);
+    if (!Number.isFinite(level) || level < 1) return null;
+    return Math.floor(level);
+}
+
+function getMonsterLevel(monsterName) {
+    for (let level = 1; level <= 3; level++) {
+        if (monsterConfig.levels[level].includes(monsterName)) return level;
+    }
+
+    return 3;
+}
 
 function getMonsterFileName(monsterName) {
-    const replacements = { peeper: "eye_monster", peepers: "eye_monster", "shadow child": "shadow_child", "shadow children": "shadow_child", gnomes: "gnome", "apex predator": "apex_predator", "apex predators": "apex_predator", chef: "chef_frog", chefs: "chef_frog", clown: "clown_beamer", animals: "animal", upscreams: "upscream", bowties: "bowtie", mentalists: "mentalist", spewers: "spewer", bangers: "banger" };
+    const replacements = {
+        peeper: "eye_monster",
+        peepers: "eye_monster",
+        "shadow child": "shadow_child",
+        "shadow children": "shadow_child",
+        gnomes: "gnome",
+        "apex predator": "apex_predator",
+        "apex predators": "apex_predator",
+        chef: "chef_frog",
+        chefs: "chef_frog",
+        clown: "clown_beamer",
+        animals: "animal",
+        upscreams: "upscream",
+        bowties: "bowtie",
+        mentalists: "mentalist",
+        spewers: "spewer",
+        bangers: "banger"
+    };
     const key = monsterName.toLowerCase();
     return replacements[key] || key;
 }
@@ -195,18 +431,36 @@ function getMonsterCount(monsterName, level, isReplacement = false) {
 
 function getMonsterStrength(monsterName) {
     if (monsterConfig.strength[monsterName] !== undefined) return monsterConfig.strength[monsterName];
-    if (monsterName.endsWith("s")) return monsterConfig.strength[monsterName.slice(0, -1)];
+    if (monsterName.endsWith("s")) {
+        return monsterConfig.strength[monsterName.slice(0, -1)];
+    }
     return undefined;
 }
 
 function createMonsterEntry(monsterName, level, isReplacement, sourceId = null) {
-    return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, level, name: monsterName, image: `assets/monsters/${getMonsterFileName(monsterName)}.webp`, count: getMonsterCount(monsterName, level, isReplacement), strength: getMonsterStrength(monsterName), sourceId };
+    return {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        level,
+        name: monsterName,
+        image: `assets/monsters/${getMonsterFileName(monsterName)}.webp`,
+        count: getMonsterCount(monsterName, level, isReplacement),
+        strength: getMonsterStrength(monsterName),
+        sourceId
+    };
 }
 
 function addSeenMonster(rawName, rawSourceId) {
     const monsterName = normalizeMonsterName(rawName);
-    if (!monsterName) return { ok: false, statusCode: 422, payload: { error: "Unknown monster", received: rawName } };
-    const state = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), monsters: Array.isArray(overlayState?.monsters) ? overlayState.monsters : [], roster: Array.isArray(overlayState?.roster) ? overlayState.roster : [] };
+    if (!monsterName) {
+        return { ok: false, statusCode: 422, payload: { error: "Unknown monster", received: rawName } };
+    }
+
+    const state = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        monsters: Array.isArray(overlayState?.monsters) ? overlayState.monsters : [],
+        roster: Array.isArray(overlayState?.roster) ? overlayState.roster : []
+    };
     const level = getMonsterLevel(monsterName);
     const isReplacement = level === 3 && !monsterConfig.levels[3].includes(monsterName);
     const monsterCount = getMonsterCount(monsterName, level, isReplacement);
@@ -214,10 +468,12 @@ function addSeenMonster(rawName, rawSourceId) {
     const rosterSlot = rawId == null ? null : state.roster.find((slot) => Array.isArray(slot.sourceIds) && slot.sourceIds.includes(rawId));
     const sourceId = rosterSlot?.id || (rawId == null ? null : `enemy:${rawId}`);
 
-    if ((sourceId != null && state.monsters.some((monster) => monster.sourceId === sourceId)) || (state.roster.length === 0 && monsterCount != null && state.monsters.some((monster) => normalizeMonsterKey(monster.name) === normalizeMonsterKey(monsterName)))) {
+    if ((sourceId != null && state.monsters.some((monster) => monster.sourceId === sourceId))
+        || (state.roster.length === 0 && monsterCount != null && state.monsters.some((monster) => normalizeMonsterKey(monster.name) === normalizeMonsterKey(monsterName)))) {
         overlayState = state;
         return { ok: true, statusCode: 200, payload: { ok: true, added: false, monster: monsterName, reason: "already-known" } };
     }
+
     if (state.roster.length === 0) {
         const counts = getCountsForLevel(state.level);
         const currentLevelCount = state.monsters.filter((monster) => monster.level === level).length;
@@ -226,71 +482,162 @@ function addSeenMonster(rawName, rawSourceId) {
             return { ok: true, statusCode: 200, payload: { ok: true, added: false, monster: monsterName, reason: "level-slot-limit" } };
         }
     }
-    overlayState = { ...state, monsters: [...state.monsters, createMonsterEntry(monsterName, level, isReplacement, sourceId)] };
+
+    overlayState = {
+        ...state,
+        monsters: [...state.monsters, createMonsterEntry(monsterName, level, isReplacement, sourceId)]
+    };
     return { ok: true, statusCode: 200, payload: { ok: true, added: true, monster: monsterName, level } };
 }
 
 function updateMonsterRoster(rawMonsters) {
-    if (!Array.isArray(rawMonsters)) return { ok: false, statusCode: 422, payload: { error: "Invalid monster roster" } };
-    const state = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), monsters: Array.isArray(overlayState?.monsters) ? overlayState.monsters : [], roster: Array.isArray(overlayState?.roster) ? overlayState.roster : [] };
+    if (!Array.isArray(rawMonsters)) {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid monster roster" } };
+    }
+
+    const state = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        monsters: Array.isArray(overlayState?.monsters) ? overlayState.monsters : [],
+        roster: Array.isArray(overlayState?.roster) ? overlayState.roster : []
+    };
     const roster = state.roster.map((slot) => ({ ...slot, sourceIds: Array.isArray(slot.sourceIds) ? [...slot.sourceIds] : [] }));
+
     for (const rawMonster of rawMonsters) {
         const monsterName = normalizeMonsterName(rawMonster?.name);
         if (!monsterName || rawMonster?.id == null) continue;
-        const sourceId = String(rawMonster.id), level = getMonsterLevel(monsterName), isReplacement = level === 3 && !monsterConfig.levels[3].includes(monsterName);
-        const groupSize = getMonsterCount(monsterName, level, isReplacement), groupKey = groupSize == null ? null : normalizeMonsterKey(monsterName);
+
+        const sourceId = String(rawMonster.id);
+        const level = getMonsterLevel(monsterName);
+        const isReplacement = level === 3 && !monsterConfig.levels[3].includes(monsterName);
+        const groupSize = getMonsterCount(monsterName, level, isReplacement);
+        const groupKey = groupSize == null ? null : normalizeMonsterKey(monsterName);
         let slot = roster.find((entry) => Array.isArray(entry.sourceIds) && entry.sourceIds.includes(sourceId));
         if (!slot && groupKey != null) {
             const groupSlots = roster.filter((entry) => entry.groupKey === groupKey);
             slot = groupSlots.find((entry) => entry.sourceIds.length < groupSize);
-            if (!slot) { slot = { id: `group:${groupKey}:${groupSlots.length + 1}`, level, groupKey, sourceIds: [] }; roster.push(slot); }
+            if (!slot) {
+                slot = { id: `group:${groupKey}:${groupSlots.length + 1}`, level, groupKey, sourceIds: [] };
+                roster.push(slot);
+            }
         }
         const slotId = `enemy:${sourceId}`;
         if (!slot && groupKey == null) slot = roster.find((entry) => entry.id === slotId);
-        if (!slot) { slot = { id: slotId, level, sourceIds: [] }; roster.push(slot); }
+        if (!slot) {
+            slot = { id: slotId, level, sourceIds: [] };
+            roster.push(slot);
+        }
         if (!slot.sourceIds.includes(sourceId)) slot.sourceIds.push(sourceId);
     }
+
     roster.sort((left, right) => left.level - right.level || left.id.localeCompare(right.id));
     const rosterSourceIds = new Set(roster.flatMap((slot) => slot.sourceIds || []).map(String));
-    for (const sourceId of proximityBySourceId.keys()) { if (!rosterSourceIds.has(sourceId)) proximityBySourceId.delete(sourceId); }
+    for (const sourceId of proximityBySourceId.keys()) {
+        if (!rosterSourceIds.has(sourceId)) proximityBySourceId.delete(sourceId);
+    }
     overlayState = { ...state, roster, rosterPending: false };
     return { ok: true, statusCode: 200, payload: { ok: true, slots: roster.length } };
 }
 
-function getPortableRoot() { return path.basename(serverRoot).toLowerCase() === "resources" ? path.dirname(serverRoot) : serverRoot; }
-function padTimePart(value) { return String(value).padStart(2, "0"); }
+function getPortableRoot() {
+    return path.basename(serverRoot).toLowerCase() === "resources"
+        ? path.dirname(serverRoot)
+        : serverRoot;
+}
+
+function padTimePart(value) {
+    return String(value).padStart(2, "0");
+}
+
 function createTimestampFilePath() {
     const now = new Date();
-    const fileName = [now.getFullYear(), padTimePart(now.getMonth() + 1), padTimePart(now.getDate())].join("-") + "_" + [padTimePart(now.getHours()), padTimePart(now.getMinutes()), padTimePart(now.getSeconds())].join("-") + ".txt";
+    const fileName = [
+        now.getFullYear(),
+        padTimePart(now.getMonth() + 1),
+        padTimePart(now.getDate())
+    ].join("-") + "_" + [
+        padTimePart(now.getHours()),
+        padTimePart(now.getMinutes()),
+        padTimePart(now.getSeconds())
+    ].join("-") + ".txt";
     return path.join(getPortableRoot(), "timestamps", fileName);
 }
-function formatLocalClockTime(date = new Date()) { return `${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}:${padTimePart(date.getSeconds())}`; }
-function normalizeLevelName(value) { const raw = String(value || "").trim(); if (!raw) return "?"; const compact = raw.replace(/[^a-z0-9]/gi, "").toLowerCase(); if (levelNameAliases[compact]) return levelNameAliases[compact]; for (const [name, levelName] of Object.entries(levelNameAliases)) { if (compact.includes(name)) return levelName; } return "?"; }
 
-function createTimestampSession() { timestampSession = { filePath: createTimestampFilePath(), lines: [], activeLineIndex: null }; return timestampSession; }
-function getTimestampSession() { if (!timestampSession) return createTimestampSession(); return timestampSession; }
-function writeTimestampSession() { if (!timestampSession) return; try { fs.mkdirSync(path.dirname(timestampSession.filePath), { recursive: true }); fs.writeFileSync(timestampSession.filePath, `${timestampSession.lines.join("\n")}\n`, "utf8"); } catch (error) { console.warn(`Could not write timestamps file: ${error.message}`); } }
-function formatMonsterTimestampList(monsters) { return getMonsterTotals(monsters).map(({ name, count }) => count > 1 ? `${name} x${count}` : name); }
+function formatLocalClockTime(date = new Date()) {
+    return `${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}:${padTimePart(date.getSeconds())}`;
+}
+
+function normalizeLevelName(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "?";
+
+    const compact = raw.replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (levelNameAliases[compact]) return levelNameAliases[compact];
+
+    for (const [name, levelName] of Object.entries(levelNameAliases)) {
+        if (compact.includes(name)) return levelName;
+    }
+    return "?";
+}
+
+function createTimestampSession() {
+    timestampSession = {
+        filePath: createTimestampFilePath(),
+        lines: [],
+        activeLineIndex: null
+    };
+    return timestampSession;
+}
+
+function getTimestampSession() {
+    if (!timestampSession) return createTimestampSession();
+    return timestampSession;
+}
+
+function writeTimestampSession() {
+    if (!timestampSession) return;
+
+    try {
+        fs.mkdirSync(path.dirname(timestampSession.filePath), { recursive: true });
+        fs.writeFileSync(timestampSession.filePath, `${timestampSession.lines.join("\n")}\n`, "utf8");
+    } catch (error) {
+        console.warn(`Could not write timestamps file: ${error.message}`);
+    }
+}
+
+function formatMonsterTimestampList(monsters) {
+    return getMonsterTotals(monsters).map(({ name, count }) => count > 1 ? `${name} x${count}` : name);
+}
+
 function getMonsterTotals(monsters) {
     const totals = new Map();
     for (const monster of Array.isArray(monsters) ? monsters : []) {
         const name = String(monster?.name || "").trim();
         if (!name) continue;
-        const count = Number(monster.count), visibleCount = Number.isFinite(count) && count > 1 ? Math.floor(count) : 1;
+
+        const count = Number(monster.count);
+        const visibleCount = Number.isFinite(count) && count > 1 ? Math.floor(count) : 1;
         totals.set(name, (totals.get(name) || 0) + visibleCount);
     }
+
     return [...totals.entries()].map(([name, count]) => ({ name, count }));
 }
+
 function finalizeActiveTimestampLine() {
     if (!timestampSession || timestampSession.activeLineIndex == null) return;
+
     const monsters = formatMonsterTimestampList(overlayState?.monsters);
     const line = timestampSession.lines[timestampSession.activeLineIndex] || "";
-    timestampSession.lines[timestampSession.activeLineIndex] = monsters.length > 0 ? `${line.replace(/\s+\[[^\]]*\]$/, "")} [${monsters.join(", ")}]` : line.replace(/\s+\[[^\]]*\]$/, "");
+    timestampSession.lines[timestampSession.activeLineIndex] = monsters.length > 0
+        ? `${line.replace(/\s+\[[^\]]*\]$/, "")} [${monsters.join(", ")}]`
+        : line.replace(/\s+\[[^\]]*\]$/, "");
     timestampSession.activeLineIndex = null;
     writeTimestampSession();
 }
+
 function startTimestampLine(level, rawLevelName) {
     finalizeActiveTimestampLine();
+
     const session = getTimestampSession();
     const line = `${formatLocalClockTime()} Level ${level} ${normalizeLevelName(rawLevelName)}`;
     session.lines.push(line);
@@ -299,121 +646,258 @@ function startTimestampLine(level, rawLevelName) {
 }
 
 function updateMonsterStatuses(rawStatuses) {
-    if (!Array.isArray(rawStatuses)) return { ok: false, statusCode: 422, payload: { error: "Invalid monster statuses" } };
-    const state = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), monsters: Array.isArray(overlayState?.monsters) ? overlayState.monsters : [], roster: Array.isArray(overlayState?.roster) ? overlayState.roster : [] };
+    if (!Array.isArray(rawStatuses)) {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid monster statuses" } };
+    }
+
+    const state = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        monsters: Array.isArray(overlayState?.monsters) ? overlayState.monsters : [],
+        roster: Array.isArray(overlayState?.roster) ? overlayState.roster : []
+    };
     const statuses = new Map();
     for (const rawStatus of rawStatuses) {
         if (rawStatus?.id == null || typeof rawStatus.alive !== "boolean") continue;
-        const remaining = Number(rawStatus.respawnRemaining), health = Number(rawStatus.health), maxHealth = Number(rawStatus.maxHealth);
-        const hasHealth = rawStatus.health != null && Number.isFinite(health), hasMaxHealth = rawStatus.maxHealth != null && Number.isFinite(maxHealth);
+        const remaining = Number(rawStatus.respawnRemaining);
+        const health = Number(rawStatus.health);
+        const maxHealth = Number(rawStatus.maxHealth);
+        const hasHealth = rawStatus.health != null && Number.isFinite(health);
+        const hasMaxHealth = rawStatus.maxHealth != null && Number.isFinite(maxHealth);
         const sourceId = String(rawStatus.id);
         const previousProximity = proximityBySourceId.get(sourceId) || { playerClose: false, playerVeryClose: false };
-        const proximity = { playerClose: typeof rawStatus.playerClose === "boolean" ? rawStatus.playerClose : previousProximity.playerClose, playerVeryClose: typeof rawStatus.playerVeryClose === "boolean" ? rawStatus.playerVeryClose : previousProximity.playerVeryClose };
+        const proximity = {
+            playerClose: typeof rawStatus.playerClose === "boolean" ? rawStatus.playerClose : previousProximity.playerClose,
+            playerVeryClose: typeof rawStatus.playerVeryClose === "boolean" ? rawStatus.playerVeryClose : previousProximity.playerVeryClose
+        };
         proximityBySourceId.set(sourceId, proximity);
-        statuses.set(sourceId, { alive: rawStatus.alive, respawnRemaining: Number.isFinite(remaining) ? Math.max(0, remaining) : 0, health: hasHealth ? Math.max(0, health) : null, maxHealth: hasMaxHealth ? Math.max(0, maxHealth) : null, ...proximity });
+        statuses.set(sourceId, {
+            alive: rawStatus.alive,
+            respawnRemaining: Number.isFinite(remaining) ? Math.max(0, remaining) : 0,
+            health: hasHealth ? Math.max(0, health) : null,
+            maxHealth: hasMaxHealth ? Math.max(0, maxHealth) : null,
+            ...proximity
+        });
     }
+
     const now = Date.now();
     let updatedSlots = 0;
     const roster = state.roster.map((slot) => {
         const sourceIds = Array.isArray(slot.sourceIds) ? slot.sourceIds.map(String) : [];
         const sourceStatuses = sourceIds.map((id) => statuses.get(id)).filter(Boolean);
         const proximityStatuses = sourceIds.map((id) => proximityBySourceId.get(id)).filter(Boolean);
-        const proximityPatch = { playerClose: proximityStatuses.some((status) => status.playerClose), playerVeryClose: proximityStatuses.some((status) => status.playerVeryClose) };
-        if (sourceStatuses.length === 0 || sourceStatuses.length !== sourceIds.length) { if (sourceStatuses.length > 0) { updatedSlots++; return { ...slot, ...proximityPatch }; } return slot; }
+        const proximityPatch = {
+            playerClose: proximityStatuses.some((status) => status.playerClose),
+            playerVeryClose: proximityStatuses.some((status) => status.playerVeryClose)
+        };
+        if (sourceStatuses.length === 0 || sourceStatuses.length !== sourceIds.length) {
+            if (sourceStatuses.length > 0) {
+                updatedSlots++;
+                return { ...slot, ...proximityPatch };
+            }
+            return slot;
+        }
+
         updatedSlots++;
         const healthStatuses = sourceStatuses.filter((status) => status.health != null);
-        const healthPatch = healthStatuses.length > 0 ? { health: healthStatuses.reduce((total, status) => total + status.health, 0), maxHealth: healthStatuses.some((status) => status.maxHealth != null) ? healthStatuses.reduce((total, status) => total + (status.maxHealth || 0), 0) : null } : {};
+        const healthPatch = healthStatuses.length > 0
+            ? {
+                health: healthStatuses.reduce((total, status) => total + status.health, 0),
+                maxHealth: healthStatuses.some((status) => status.maxHealth != null)
+                    ? healthStatuses.reduce((total, status) => total + (status.maxHealth || 0), 0)
+                    : null
+            }
+            : {};
         const clearFlashPatch = { respawnFlashAt: null, respawnFlashUntil: null, respawnFlashAmount: null };
-        if (sourceStatuses.some((status) => status.alive)) { return { ...slot, ...healthPatch, ...proximityPatch, ...clearFlashPatch, alive: true, respawnEndsAt: null, respawnDuration: null }; }
-        const remainingValues = sourceStatuses.map((status) => status.respawnRemaining).filter((remaining) => remaining > 0);
-
-        // --- ИЗМЕНЕНИЕ ДЛЯ СИНХРОНИЗАЦИИ ТАЙМЕРА ---
-        let remaining = 60; // Дефолтный таймер, если клиент не прислал значение
-        if (remainingValues.length > 0) {
-            remaining = Math.min(...remainingValues);
-        } else if (slot.alive !== false && slot.respawnEndsAt == null) {
-            // Если монстр только что умер, ставим таймер
-            remaining = 60;
-        } else if (slot.respawnEndsAt != null) {
-            // Если монстр уже мертв, высчитываем остаток
-            remaining = Math.max(0, (Number(slot.respawnEndsAt) - now) / 1000);
+        if (sourceStatuses.some((status) => status.alive)) {
+            return { ...slot, ...healthPatch, ...proximityPatch, ...clearFlashPatch, alive: true, respawnEndsAt: null, respawnDuration: null };
         }
-        // ------------------------------------------
 
-        const existingEnd = Number(slot.respawnEndsAt), projectedRemaining = Number.isFinite(existingEnd) ? Math.max(0, (existingEnd - now) / 1000) : null;
-        const suddenReduction = slot.alive === false && projectedRemaining != null ? projectedRemaining - remaining : 0;
+        const remainingValues = sourceStatuses
+            .map((status) => status.respawnRemaining)
+            .filter((remaining) => remaining > 0);
+        if (remainingValues.length === 0) {
+            return { ...slot, ...healthPatch, ...proximityPatch, ...clearFlashPatch, alive: false, respawnEndsAt: null, respawnDuration: null };
+        }
+
+        const remaining = Math.min(...remainingValues);
+        const existingEnd = Number(slot.respawnEndsAt);
+        const projectedRemaining = Number.isFinite(existingEnd) ? Math.max(0, (existingEnd - now) / 1000) : null;
+        const suddenReduction = slot.alive === false && projectedRemaining != null
+            ? projectedRemaining - remaining
+            : 0;
         const hasRespawnReductionFlash = suddenReduction >= respawnReductionFlashThresholdSeconds;
-        const keepExistingEnd = slot.alive === false && projectedRemaining != null && Math.abs(projectedRemaining - remaining) < 1.5;
+        const keepExistingEnd = slot.alive === false
+            && projectedRemaining != null
+            && Math.abs(projectedRemaining - remaining) < 1.5;
         const respawnEndsAt = keepExistingEnd ? existingEnd : now + remaining * 1000;
-        const previousDuration = Number(slot.respawnDuration), respawnDuration = slot.alive === false && Number.isFinite(previousDuration) ? Math.max(previousDuration, remaining) : remaining;
-        const flashPatch = hasRespawnReductionFlash ? { respawnFlashAt: now, respawnFlashUntil: now + respawnReductionFlashDurationMs, respawnFlashAmount: Math.max(1, Math.round(suddenReduction)) } : Number(slot.respawnFlashUntil) > now ? { respawnFlashAt: slot.respawnFlashAt, respawnFlashUntil: slot.respawnFlashUntil, respawnFlashAmount: slot.respawnFlashAmount } : { respawnFlashAt: null, respawnFlashUntil: null, respawnFlashAmount: null };
+        const previousDuration = Number(slot.respawnDuration);
+        const respawnDuration = slot.alive === false && Number.isFinite(previousDuration)
+            ? Math.max(previousDuration, remaining)
+            : remaining;
+        const flashPatch = hasRespawnReductionFlash
+            ? {
+                respawnFlashAt: now,
+                respawnFlashUntil: now + respawnReductionFlashDurationMs,
+                respawnFlashAmount: Math.max(1, Math.round(suddenReduction))
+            }
+            : Number(slot.respawnFlashUntil) > now
+                ? {
+                    respawnFlashAt: slot.respawnFlashAt,
+                    respawnFlashUntil: slot.respawnFlashUntil,
+                    respawnFlashAmount: slot.respawnFlashAmount
+                }
+                : { respawnFlashAt: null, respawnFlashUntil: null, respawnFlashAmount: null };
+
         return { ...slot, ...healthPatch, ...proximityPatch, ...flashPatch, alive: false, respawnEndsAt, respawnDuration };
     });
+
     overlayState = { ...state, roster };
     return { ok: true, statusCode: 200, payload: { ok: true, updatedSlots } };
 }
 
 function setGameLevel(rawLevel, rawLevelName) {
     const level = normalizeLevel(rawLevel);
-    if (level == null) return { ok: false, statusCode: 422, payload: { error: "Invalid level", received: rawLevel } };
+    if (level == null) {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid level", received: rawLevel } };
+    }
+
     startTimestampLine(level, rawLevelName);
     proximityBySourceId.clear();
-    overlayState = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), level, gameplayVisible: true, ...defaultPlayerUpgrades, seconds: 0, running: true, startedAt: Date.now(), monsters: [], roster: [], rosterPending: true, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0 };
+
+    overlayState = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        level,
+        gameplayVisible: true,
+        ...defaultPlayerUpgrades,
+        seconds: 0,
+        running: true,
+        startedAt: Date.now(),
+        monsters: [],
+        roster: [],
+        rosterPending: true,
+        mapValue: 0,
+        mapValueInitial: 0,
+        mapValueGoal: null,
+        lostValue: 0
+    };
     return { ok: true, statusCode: 200, payload: { ok: true, level } };
 }
 
 function setGameplayVisibility(rawVisible) {
-    if (typeof rawVisible !== "boolean") return { ok: false, statusCode: 422, payload: { error: "Invalid visibility", received: rawVisible } };
-    if (!rawVisible) finalizeActiveTimestampLine();
-    overlayState = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), gameplayVisible: rawVisible };
+    if (typeof rawVisible !== "boolean") {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid visibility", received: rawVisible } };
+    }
+
+    if (!rawVisible) {
+        finalizeActiveTimestampLine();
+    }
+
+    overlayState = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        gameplayVisible: rawVisible
+    };
+
     return { ok: true, statusCode: 200, payload: { ok: true, gameplayVisible: rawVisible } };
 }
 
 function setPlayerStrength(rawStrength) {
     const strength = Number(rawStrength);
-    if (!Number.isFinite(strength) || strength < 0) return { ok: false, statusCode: 422, payload: { error: "Invalid strength", received: rawStrength } };
-    overlayState = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), strength: Math.floor(strength) };
+    if (!Number.isFinite(strength) || strength < 0) {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid strength", received: rawStrength } };
+    }
+
+    overlayState = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        strength: Math.floor(strength)
+    };
+
     return { ok: true, statusCode: 200, payload: { ok: true, strength: overlayState.strength } };
 }
 
 function setTabHidden(rawHidden) {
-    if (typeof rawHidden !== "boolean") return { ok: false, statusCode: 422, payload: { error: "Invalid Tab visibility", received: rawHidden } };
-    overlayState = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), tabHidden: rawHidden };
+    if (typeof rawHidden !== "boolean") {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid Tab visibility", received: rawHidden } };
+    }
+
+    overlayState = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        tabHidden: rawHidden
+    };
     return { ok: true, statusCode: 200, payload: { ok: true, tabHidden: rawHidden } };
 }
 
 function setTumbleLaunch(rawTumbleLaunch) {
     const tumbleLaunch = Number(rawTumbleLaunch);
-    if (!Number.isFinite(tumbleLaunch) || tumbleLaunch < 0) return { ok: false, statusCode: 422, payload: { error: "Invalid Tumble Launch", received: rawTumbleLaunch } };
-    overlayState = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), tumbleLaunch: Math.floor(tumbleLaunch) };
+    if (!Number.isFinite(tumbleLaunch) || tumbleLaunch < 0) {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid Tumble Launch", received: rawTumbleLaunch } };
+    }
+
+    overlayState = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        tumbleLaunch: Math.floor(tumbleLaunch)
+    };
+
     return { ok: true, statusCode: 200, payload: { ok: true, tumbleLaunch: overlayState.tumbleLaunch } };
 }
 
 function setPlayerUpgrades(rawPayload) {
-    if (!rawPayload || !Array.isArray(rawPayload.players)) return { ok: false, statusCode: 422, payload: { error: "Invalid players payload" } };
-    const state = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}) };
+    if (!rawPayload || !Array.isArray(rawPayload.players)) {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid players payload" } };
+    }
+
+    const state = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {})
+    };
+
     const players = state.players || {};
+
     for (const playerData of rawPayload.players) {
         const steamId = playerData.steamId;
         const playerName = playerData.name;
         const rawUpgrades = playerData.upgrades || {};
+
         const updates = {};
         for (const key of Object.keys(defaultPlayerUpgrades)) {
             if (!(key in rawUpgrades)) continue;
             const value = Number(rawUpgrades[key]);
-            if (Number.isFinite(value) && value >= 0) updates[key] = Math.floor(value);
+            if (Number.isFinite(value) && value >= 0) {
+                updates[key] = Math.floor(value);
+            }
         }
-        players[steamId] = { ...(players[steamId] || defaultPlayerUpgrades), ...updates, name: playerName };
+
+        players[steamId] = {
+            ...(players[steamId] || defaultPlayerUpgrades),
+            ...updates,
+            name: playerName
+        };
     }
-    if (rawPayload.localSteamId !== undefined) { state.localSteamId = rawPayload.localSteamId; }
+
+    // Сохраняем локальный ID для работы фильтра
+    if (rawPayload.localSteamId !== undefined) {
+        state.localSteamId = rawPayload.localSteamId;
+    }
+
     overlayState = { ...state, players };
     return { ok: true, statusCode: 200, payload: { ok: true, processedPlayers: rawPayload.players.length } };
 }
 
 function setMapValue(rawPayload) {
-    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) return { ok: false, statusCode: 422, payload: { error: "Invalid map value payload" } };
+    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid map value payload" } };
+    }
+
     const mapValue = normalizeCurrencyValue(rawPayload.value ?? rawPayload.mapValue ?? rawPayload.current, null);
-    if (mapValue == null) return { ok: false, statusCode: 422, payload: { error: "Invalid map value", received: rawPayload.value ?? rawPayload.mapValue ?? rawPayload.current } };
+    if (mapValue == null) {
+        return { ok: false, statusCode: 422, payload: { error: "Invalid map value", received: rawPayload.value ?? rawPayload.mapValue ?? rawPayload.current } };
+    }
+
     const updates = { mapValue };
     const mapValueInitial = normalizeCurrencyValue(rawPayload.initial ?? rawPayload.mapValueInitial, null);
     const mapValueGoal = normalizeCurrencyValue(rawPayload.goal ?? rawPayload.mapValueGoal, null);
@@ -421,7 +905,13 @@ function setMapValue(rawPayload) {
     if (mapValueInitial != null) updates.mapValueInitial = mapValueInitial;
     if (mapValueGoal != null) updates.mapValueGoal = mapValueGoal;
     if (lostValue != null) updates.lostValue = lostValue;
-    overlayState = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), ...updates };
+
+    overlayState = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        ...updates
+    };
+
     return { ok: true, statusCode: 200, payload: { ok: true, mapValue: overlayState.mapValue, mapValueInitial: overlayState.mapValueInitial, mapValueGoal: overlayState.mapValueGoal, lostValue: overlayState.lostValue } };
 }
 
@@ -429,127 +919,183 @@ function serveFile(request, response) {
     const requestUrl = new URL(request.url, `http://${request.headers.host}`);
     const pathname = decodeURIComponent(requestUrl.pathname === "/" ? "/overlay.html" : requestUrl.pathname);
     const filePath = path.normalize(path.join(serverRoot, pathname));
-    if (!filePath.startsWith(serverRoot)) { response.writeHead(403); response.end("Forbidden"); return; }
+
+    if (!filePath.startsWith(serverRoot)) {
+        response.writeHead(403);
+        response.end("Forbidden");
+        return;
+    }
+
     fs.stat(filePath, (statError, stats) => {
-        if (statError || !stats.isFile()) { response.writeHead(404); response.end("Not found"); return; }
+        if (statError || !stats.isFile()) {
+            response.writeHead(404);
+            response.end("Not found");
+            return;
+        }
+
         const ext = path.extname(filePath).toLowerCase();
-        response.writeHead(200, { "Content-Type": mimeTypes[ext] || "application/octet-stream", "Cache-Control": "no-store" });
+        response.writeHead(200, {
+            "Content-Type": mimeTypes[ext] || "application/octet-stream",
+            "Cache-Control": "no-store"
+        });
         fs.createReadStream(filePath).pipe(response);
     });
 }
 
 const server = http.createServer(async (request, response) => {
     try {
-        if (request.method === "GET" && request.url === "/api/state") { sendJson(response, 200, { state: getNormalizedOverlayState() }); return; }
+        if (request.method === "GET" && request.url === "/api/state") {
+            sendJson(response, 200, { state: getNormalizedOverlayState() });
+            return;
+        }
+
         if (request.method === "POST" && request.url === "/api/state") {
             const body = await readBody(request);
-            overlayState = normalizeOverlayState(JSON.parse(body || "{}").state);
+            const payload = JSON.parse(body || "{}");
+            overlayState = normalizeOverlayState(payload.state);
             sendJson(response, 200, { ok: true });
             broadcastState();
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/monster-seen") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = addSeenMonster(payload.name || payload.monster || payload.enemy, payload.id ?? payload.instanceId);
             sendJson(response, result.statusCode, result.payload);
-            if (result.ok && result.payload.added) broadcastState();
+            if (result.ok && result.payload.added) {
+                broadcastState();
+            }
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/roster") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = updateMonsterRoster(payload.monsters);
             sendJson(response, result.statusCode, result.payload);
             if (result.ok) broadcastState();
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/monster-status") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = updateMonsterStatuses(payload.statuses);
             sendJson(response, result.statusCode, result.payload);
             if (result.ok && result.payload.updatedSlots > 0) broadcastState();
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/level") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = setGameLevel(payload.level, payload.levelName || payload.mapName || payload.map || payload.location);
             sendJson(response, result.statusCode, result.payload);
-            if (result.ok) broadcastState();
+            if (result.ok) {
+                broadcastState();
+            }
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/visibility") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = setGameplayVisibility(payload.visible ?? payload.gameplayVisible);
             sendJson(response, result.statusCode, result.payload);
-            if (result.ok) broadcastState();
+            if (result.ok) {
+                broadcastState();
+            }
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/strength") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = setPlayerStrength(payload.strength);
             sendJson(response, result.statusCode, result.payload);
-            if (result.ok) broadcastState();
+            if (result.ok) {
+                broadcastState();
+            }
             return;
         }
-
-        // ---------- ЗАЩИТА ОТ ДВОЙНОГО НАЖАТИЯ F2 ----------
-        if (request.method === "POST" && request.url === "/api/cursor") {
-            const payload = JSON.parse(await readBody(request) || "{}");
-            const state = {
-                ...defaultOverlayState,
-                ...(normalizeOverlayState(overlayState) || {})
-            };
-            state.cursorVisible = Boolean(payload.visible);
-            overlayState = state;
-            sendJson(response, 200, { ok: true, cursorVisible: state.cursorVisible });
-            broadcastState();
-            return;
-        }
-        // --------------------------------------------------
 
         if (request.method === "POST" && request.url === "/api/tab-hidden") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = setTabHidden(payload.hidden ?? payload.tabHidden);
             sendJson(response, result.statusCode, result.payload);
-            if (result.ok) broadcastState();
+            if (result.ok) {
+                broadcastState();
+            }
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/tumble-launch") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = setTumbleLaunch(payload.tumbleLaunch ?? payload.value);
             sendJson(response, result.statusCode, result.payload);
-            if (result.ok) broadcastState();
+            if (result.ok) {
+                broadcastState();
+            }
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/upgrades") {
-            const payload = JSON.parse(await readBody(request) || "{}");
-            const result = setPlayerUpgrades(payload);
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
+            // Было: const result = setPlayerUpgrades(payload.upgrades ?? payload);
+            const result = setPlayerUpgrades(payload); // СТАЛО
             sendJson(response, result.statusCode, result.payload);
-            if (result.ok) broadcastState();
+            if (result.ok) {
+                broadcastState();
+            }
             return;
         }
+
         if (request.method === "POST" && request.url === "/api/map-value") {
-            const payload = JSON.parse(await readBody(request) || "{}");
+            const body = await readBody(request);
+            const payload = JSON.parse(body || "{}");
             const result = setMapValue(payload);
             sendJson(response, result.statusCode, result.payload);
-            if (result.ok) broadcastState();
+            if (result.ok) {
+                broadcastState();
+            }
             return;
         }
+
         if (request.method === "GET" && request.url === "/api/events") {
-            response.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" });
+            response.writeHead(200, {
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-store",
+                Connection: "keep-alive"
+            });
             response.write("\n");
             clients.add(response);
             request.on("close", () => clients.delete(response));
             return;
         }
-        if (request.method === "GET") { serveFile(request, response); return; }
-        response.writeHead(405); response.end("Method not allowed");
-    } catch (error) { sendJson(response, 500, { error: error.message }); }
+
+        if (request.method === "GET") {
+            serveFile(request, response);
+            return;
+        }
+
+        response.writeHead(405);
+        response.end("Method not allowed");
+    } catch (error) {
+        sendJson(response, 500, { error: error.message });
+    }
 });
 
 function startOverlayServer(options = {}) {
     if (server.listening) return Promise.resolve(server);
+
     serverRoot = path.resolve(options.root || __dirname);
-    const listenHost = options.host || host, listenPort = Number(options.port || port);
+    const listenHost = options.host || host;
+    const listenPort = Number(options.port || port);
+
     return new Promise((resolve, reject) => {
         const handleError = (error) => reject(error);
         server.once("error", handleError);
@@ -570,6 +1116,10 @@ function stopOverlayServer() {
 }
 
 if (require.main === module) {
-    startOverlayServer().catch((error) => { console.error(`Overlay server failed: ${error.message}`); process.exitCode = 1; });
+    startOverlayServer().catch((error) => {
+        console.error(`Overlay server failed: ${error.message}`);
+        process.exitCode = 1;
+    });
 }
+
 module.exports = { startOverlayServer, stopOverlayServer };

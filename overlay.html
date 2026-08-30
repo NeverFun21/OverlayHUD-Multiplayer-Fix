@@ -1447,11 +1447,12 @@
             });
 
             const roster = Array.isArray(state.roster) ? [...state.roster] : [];
-            const hasMonsterIconSlots = !state.rosterPending;
+            const hasMonsterIconSlots = !state.rosterPending
+                && (roster.length > 0 || (Array.isArray(state.monsters) && state.monsters.length > 0));
             const overlayShouldBeVisible = Boolean(state.gameplayVisible && hasMonsterIconSlots);
+
             const keepOverlayPositioned = overlayContainer.classList.contains("is-positioned");
             const keepOverlayDragging = overlayContainer.classList.contains("is-dragging");
-            overlayContainer.className = "overlay-container";
             overlayContainer.className = "overlay-container";
             overlayContainer.classList.toggle("is-positioned", keepOverlayPositioned || Boolean(state.overlayPosition));
             overlayContainer.classList.toggle("is-anchor-center-x", !keepOverlayDragging && Boolean(state.overlayPosition && state.overlayPosition.anchorX === "center"));
@@ -1478,10 +1479,7 @@
             overlayContainer.classList.toggle("is-upgrade-wrap-double", state.upgradeRows === "double");
             if (state.tabHidden) overlayContainer.classList.add("is-tab-hidden");
             if (overlayShouldBeVisible) overlayContainer.classList.add("is-visible");
-
-            // Меню активно всегда, но выезжает только при открытом Esc (is-cursor-visible)
-            overlayHoverControls.classList.toggle("is-enabled", Boolean(state.gameplayVisible && !state.tabHidden));
-            overlayHoverControls.classList.toggle("is-cursor-visible", Boolean(state.cursorVisible));
+            overlayHoverControls.classList.toggle("is-enabled", overlayShouldBeVisible && !state.tabHidden);
 
             levelNumber.textContent = state.level;
             mapValueNumber.textContent = formatCurrency(state.mapValue);
@@ -1626,15 +1624,14 @@
             slider.addEventListener("change", () => slider.blur());
         });
         OverlayApp.subscribe(render);
-
         setInterval(() => {
             if (latestState && latestState.running && latestState.timerVisible) {
                 renderTimer(latestState);
             }
         }, 1000);
-
         setInterval(() => {
-            if (!latestState?.gameplayVisible || (!latestState.respawnTimerVisible && !latestState.respawnIndicatorVisible)) return;
+            if (!latestState?.gameplayVisible
+                || (!latestState.respawnTimerVisible && !latestState.respawnIndicatorVisible)) return;
             for (const square of monstersSquares.querySelectorAll('[data-cooldown-active="true"]')) {
                 renderMonsterCooldown(square);
             }
