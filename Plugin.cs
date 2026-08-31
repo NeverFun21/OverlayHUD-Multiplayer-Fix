@@ -985,7 +985,9 @@ namespace OverlayHUD
             bool runLevel = !nonGameplayCurrent && CachedIsRunLevel(null);
             bool hasLevelGenerator = false;
 
-            bool levelGenerated = IsLevelGenerated() || !CachedIsMasterClient();
+            // ДОБАВЛЕНО: Магазин не требует генерации уровня (LevelGenerator)
+            bool isShop = currentLevelName.ToLowerInvariant().Contains("shop") || SceneManager.GetActiveScene().name.ToLowerInvariant().Contains("shop");
+            bool levelGenerated = IsLevelGenerated() || !CachedIsMasterClient() || isShop;
 
             string activeSceneName = SceneManager.GetActiveScene().name;
             bool nonGameplayScene = IsNonGameplayLevelName(activeSceneName);
@@ -994,7 +996,7 @@ namespace OverlayHUD
             else if (allowExpensiveFallback) { hasLevelGenerator = HasActiveLevelGenerator(); activeNamedLevelObject = FindActiveNamedRunLevelObject(); }
             details = "current=" + currentLevelName + ", generated=" + levelGenerated;
             if (nonGameplayCurrent || nonGameplayScene) return false;
-            return levelGenerated && (listedLevel || namedLevel || runLevel || hasLevelGenerator || IsRunLevelName(activeSceneName) || !string.IsNullOrWhiteSpace(activeNamedLevelObject));
+            return levelGenerated && (listedLevel || namedLevel || runLevel || hasLevelGenerator || IsRunLevelName(activeSceneName) || isShop || !string.IsNullOrWhiteSpace(activeNamedLevelObject));
         }
 
         private static bool HasActiveLevelGenerator()
@@ -1028,7 +1030,7 @@ namespace OverlayHUD
         {
             if (string.IsNullOrWhiteSpace(levelName)) return false;
             string lower = levelName.ToLowerInvariant();
-            return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("shop") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary");
+            return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary");
         }
 
         private static bool IsNonGameplayContext()
@@ -1046,11 +1048,17 @@ namespace OverlayHUD
         private static float nextRunLevelCheck = 0f;
         private static bool CachedIsRunLevel(string sceneName)
         {
-            if (sceneName != null && IsRunLevelName(sceneName)) return true;
+            if (sceneName != null)
+            {
+                if (IsNonGameplayLevelName(sceneName)) return false;
+                // ДОБАВЛЕНА ПРОВЕРКА МАГАЗИНА:
+                if (IsRunLevelName(sceneName) || sceneName.ToLowerInvariant().Contains("shop")) return true;
+            }
             if (Time.unscaledTime > nextRunLevelCheck)
             {
                 object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "RunIsLevel");
-                isRunLevelCache = result is bool value && value;
+                // ДОБАВЛЕНА ПРОВЕРКА МАГАЗИНА:
+                isRunLevelCache = (result is bool value && value) || SceneManager.GetActiveScene().name.ToLowerInvariant().Contains("shop");
                 nextRunLevelCheck = Time.unscaledTime + 1f;
             }
             return isRunLevelCache;

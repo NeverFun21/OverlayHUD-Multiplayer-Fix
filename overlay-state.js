@@ -93,7 +93,10 @@ const OverlayApp = (() => {
         mapValue: 0,
         mapValueInitial: 0,
         mapValueGoal: null,
-        lostValue: 0
+        lostValue: 0,
+        upgradesAlignment: "center",
+        showInShop: true,
+        levelName: ""
     };
 
     let state = defaultState;
@@ -137,6 +140,8 @@ const OverlayApp = (() => {
         const lostValue = normalizeCurrencyValue(source.lostValue, defaultState.lostValue);
         const upgradeVisibility = normalizeUpgradeVisibility(source.upgradeVisibility);
         const players = source.players && typeof source.players === "object" ? source.players : {};
+        const normalizedUpgAlignment = ["left", "center", "right"].includes(source.upgradesAlignment) ? source.upgradesAlignment : defaultState.upgradesAlignment;
+        const showInShop = source.showInShop !== undefined ? Boolean(source.showInShop) : defaultState.showInShop;
 
         return {
             ...defaultState,
@@ -148,7 +153,8 @@ const OverlayApp = (() => {
             hoverOpacity, interfaceLanguage, overlayAlignment, compactModeEnabled, upgradeLayout: compactModeEnabled ? "inline" : "stacked",
             upgradeRows, overlayPosition, controlsPosition, timerVisible, upgradeTooltipsVisible, valueWrapEnabled, upgradeVisibility,
             players, monsters: Array.isArray(source.monsters) ? source.monsters : [], roster: Array.isArray(source.roster) ? source.roster : [],
-            mapValue, mapValueInitial, mapValueGoal, lostValue
+            mapValue, mapValueInitial, mapValueGoal, lostValue,
+            upgradesAlignment: normalizedUpgAlignment, showInShop, levelName: source.levelName || ""
         };
     }
 
@@ -307,9 +313,9 @@ const OverlayApp = (() => {
     function setOverlayAlignment(overlayAlignment) { updateState((currentState) => ({ ...currentState, overlayAlignment: ["left", "center", "right"].includes(overlayAlignment) ? overlayAlignment : defaultState.overlayAlignment })); }
     function setOverlayPosition(overlayPosition) { updateState((currentState) => ({ ...currentState, overlayPosition: normalizePosition(overlayPosition) })); }
     function setControlsPosition(controlsPosition) { updateState((currentState) => ({ ...currentState, controlsPosition: normalizePosition(controlsPosition) })); }
-
-    // Добавленный метод для фильтра "Только мои апгрейды"
     function setOnlyMyUpgrades(onlyMyUpgrades) { updateState((currentState) => ({ ...currentState, onlyMyUpgrades: Boolean(onlyMyUpgrades) })); }
+    function setUpgradesAlignment(upgradesAlignment) { updateState((currentState) => ({ ...currentState, upgradesAlignment: ["left", "center", "right"].includes(upgradesAlignment) ? upgradesAlignment : defaultState.upgradesAlignment })); }
+    function setShowInShop(showInShop) { updateState((currentState) => ({ ...currentState, showInShop: Boolean(showInShop) })); }
 
     return {
         monsterConfig, upgradeKeys, addMonster, formatTime, getCountsForLevel, getMonsterCount, getMonsterImage, getState,
@@ -319,6 +325,6 @@ const OverlayApp = (() => {
         setMonsterStrengthVisible, setOverlayAlignment, setOverlayPosition, setSquareSize, setStrength, setTumbleLaunch,
         setStyle, setTimerVisible, setUpgradeLayout, setUpgradeRows, setUpgradeTooltipsVisible, setUpgradeSize,
         setUpgradesVisible, setUpgradeVisibility, setRespawnTimerVisible, setRespawnIndicatorVisible,
-        setOnlyAliveMonstersVisible, setOnlyAliveIncludeUndetected, setOnlyMyUpgrades, startTimer, stopTimer, subscribe
+        setOnlyAliveMonstersVisible, setOnlyAliveIncludeUndetected, setOnlyMyUpgrades, setUpgradesAlignment, setShowInShop, startTimer, stopTimer, subscribe
     };
 })();

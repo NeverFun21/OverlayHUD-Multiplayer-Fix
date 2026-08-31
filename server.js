@@ -68,7 +68,8 @@ const defaultOverlayState = {
     overlayScaleVersion: 3, columnsCount: 11, columnsLayoutVersion: 2, overlayDefaultsVersion: 4,
     overlayAlignment: "center", overlayPosition: { left: 0, top: 0, anchorX: "center", anchorY: "top" },
     controlsPosition: null, hoverOpacity: 50, seconds: 0, running: false, startedAt: null,
-    monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0
+    monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0,
+    upgradesAlignment: "center", showInShop: true, levelName: ""
 };
 
 const levelNameAliases = { swiftbroomacademy: "Wizard", wizard: "Wizard", macjannekstation: "Arctic", arctic: "Arctic", headmanmanor: "Manor", manor: "Manor", museumofhumanarts: "Museum", museum: "Museum" };
@@ -326,14 +327,11 @@ function updateMonsterStatuses(rawStatuses) {
         if (sourceStatuses.some((status) => status.alive)) { return { ...slot, ...healthPatch, ...proximityPatch, ...clearFlashPatch, alive: true, respawnEndsAt: null, respawnDuration: null }; }
         const remainingValues = sourceStatuses.map((status) => status.respawnRemaining).filter((remaining) => remaining > 0);
 
-        // ИДЕАЛЬНЫЙ ТАЙМЕР ДЛЯ КЛИЕНТОВ: если сервер не получил нормальное время от клиента, он сам ставит 60 сек
         let remaining = 0;
         if (remainingValues.length > 0) {
             remaining = Math.min(...remainingValues);
         } else if (slot.respawnEndsAt != null) {
             remaining = Math.max(0, (Number(slot.respawnEndsAt) - now) / 1000);
-        } else {
-            remaining = 60; // Если моб только что умер, а клиент прислал 0 - ставим 60 сек по умолчанию
         }
 
         const existingEnd = Number(slot.respawnEndsAt), projectedRemaining = Number.isFinite(existingEnd) ? Math.max(0, (existingEnd - now) / 1000) : null;
@@ -354,7 +352,14 @@ function setGameLevel(rawLevel, rawLevelName) {
     if (level == null) return { ok: false, statusCode: 422, payload: { error: "Invalid level", received: rawLevel } };
     startTimestampLine(level, rawLevelName);
     proximityBySourceId.clear();
-    overlayState = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), level, gameplayVisible: true, ...defaultPlayerUpgrades, seconds: 0, running: true, startedAt: Date.now(), monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0 };
+    overlayState = {
+        ...defaultOverlayState,
+        ...(normalizeOverlayState(overlayState) || {}),
+        level, levelName: String(rawLevelName || ""), gameplayVisible: true,
+        players: {}, localSteamId: null, // <-- СБРОС ИГРОКОВ И АПГРЕЙДОВ ПЕРЕД НОВОЙ ИГРОЙ
+        ...defaultPlayerUpgrades, seconds: 0, running: true, startedAt: Date.now(),
+        monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0
+    };
     return { ok: true, statusCode: 200, payload: { ok: true, level } };
 }
 
