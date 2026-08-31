@@ -34,7 +34,7 @@
 1. Установите [BepInEx](https://github.com/BepInEx/BepInEx).
 2. Скачайте последний релиз из раздела **Releases** справа.
 3. Распакуйте архив.
-4. Поместите файл `OverlayHUD.dll` и архив `OverlayHUD\_app.zip` в папку `BepInEx/plugins`.
+4. Поместите файл `OverlayHUD.dll` и архив `OverlayHUD_app.zip` в папку `BepInEx/plugins`.
 5. Готово! Запускайте игру (убедитесь, что играете в оконном режиме без рамки / Borderless).
 
 
