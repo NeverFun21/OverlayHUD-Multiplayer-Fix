@@ -197,6 +197,14 @@
                         <span id="overlayUpgradeSizeValue">32</span>
                     </div>
                     <div class="overlay-segment-row">
+                        <span data-i18n="upgradesAlignment">Позиция</span>
+                        <div class="overlay-alignment-switch" role="group" aria-label="Upgrades alignment">
+                            <button type="button" data-upg-alignment="left" aria-label="Align left">←</button>
+                            <button type="button" data-upg-alignment="center" aria-label="Align center">•</button>
+                            <button type="button" data-upg-alignment="right" aria-label="Align right">→</button>
+                        </div>
+                    </div>
+                    <div class="overlay-segment-row">
                         <span data-i18n="upgradeRows">Строки</span>
                         <div class="overlay-layout-switch" role="group" aria-label="Upgrade rows">
                             <button type="button" data-upgrade-rows="single" aria-label="Show upgrades in one row" data-i18n="upgradeRowsSingle">1 строка</button>
@@ -208,6 +216,13 @@
                             <span data-i18n="onlyMyUpgrades">Только мои апгрейды</span>
                             <span class="overlay-toggle-switch">
                                 <input type="checkbox" id="overlayOnlyMyUpgradesToggle">
+                                <span></span>
+                            </span>
+                        </label>
+                        <label class="overlay-toggle-row">
+                            <span data-i18n="showInShop">Показывать в магазине</span>
+                            <span class="overlay-toggle-switch">
+                                <input type="checkbox" id="overlayShowInShopToggle">
                                 <span></span>
                             </span>
                         </label>
@@ -305,6 +320,8 @@
         const lostValueNumber = document.getElementById("lostValueNumber");
 
         const overlayOnlyMyUpgradesToggle = document.getElementById("overlayOnlyMyUpgradesToggle");
+        const overlayShowInShopToggle = document.getElementById("overlayShowInShopToggle");
+        const overlayUpgAlignmentButtons = [...document.querySelectorAll("[data-upg-alignment]")];
 
         let latestState = null;
         let renderedSquareCount = 0;
@@ -387,6 +404,8 @@
                 onlyAliveMonsters: "Только живые монстры",
                 onlyAliveIncludeUndetected: "и необнаруженных",
                 onlyMyUpgrades: "Только мои апгрейды",
+                showInShop: "Показывать в магазине",
+                upgradesAlignment: "Позиция",
                 level: "УРОВЕНЬ",
                 healthUnknown: "ХП: ?",
                 healthValueUnknown: (health) => `ХП: ${health} / ?`,
@@ -454,6 +473,8 @@
                 onlyAliveMonsters: "Only alive monsters",
                 onlyAliveIncludeUndetected: "and undetected",
                 onlyMyUpgrades: "Only my upgrades",
+                showInShop: "Show in shop",
+                upgradesAlignment: "Position",
                 level: "LEVEL",
                 healthUnknown: "HP: ?",
                 healthValueUnknown: (health) => `HP: ${health} / ?`,
@@ -1422,6 +1443,11 @@
             overlayTimerToggle.checked = state.timerVisible;
             overlayUpgradesToggle.checked = state.upgradesVisible;
             overlayOnlyMyUpgradesToggle.checked = state.onlyMyUpgrades;
+            overlayShowInShopToggle.checked = state.showInShop;
+            overlayUpgAlignmentButtons.forEach((button) => {
+                const isActive = button.dataset.upgAlignment === state.upgradesAlignment;
+                button.classList.toggle("is-active", isActive);
+            });
             overlayMonsterIconsToggle.checked = state.monsterIconsVisible;
             overlayMapValueToggle.checked = state.mapValueVisible;
             overlayLostValueToggle.checked = state.lostValueVisible;
@@ -1448,7 +1474,9 @@
 
             const roster = Array.isArray(state.roster) ? [...state.roster] : [];
             const hasMonsterIconSlots = true;
-            const overlayShouldBeVisible = Boolean(state.gameplayVisible && hasMonsterIconSlots);
+
+            const isShop = (state.levelName || "").toLowerCase().includes("shop");
+            const overlayShouldBeVisible = Boolean(state.gameplayVisible && hasMonsterIconSlots) && (!isShop || state.showInShop);
 
             const keepOverlayPositioned = overlayContainer.classList.contains("is-positioned");
             const keepOverlayDragging = overlayContainer.classList.contains("is-dragging");
@@ -1460,13 +1488,19 @@
             overlayContainer.classList.add(`align-${state.overlayAlignment}`);
             if (keepInlineUntilUpgradesHidden || keepInlineUntilHeaderHidden) overlayContainer.classList.add("is-topbar-inline");
             if (state.bgEnabled) overlayContainer.classList.add("with-bg");
-            if (!state.timerVisible) overlayContainer.classList.add("hide-level-timer");
+
+            if (isShop && state.showInShop) {
+                overlayContainer.classList.add("hide-monster-icons", "hide-level-badge", "hide-level-timer", "hide-map-value", "hide-lost-value");
+            } else {
+                if (!state.timerVisible) overlayContainer.classList.add("hide-level-timer");
+                if (!state.monsterIconsVisible) overlayContainer.classList.add("hide-monster-icons");
+                if (!state.mapValueVisible || Number(state.mapValue) <= 0) overlayContainer.classList.add("hide-map-value");
+                if (!state.lostValueVisible || Number(state.lostValue) <= 0) overlayContainer.classList.add("hide-lost-value");
+                if (!state.levelBadgeVisible) overlayContainer.classList.add("hide-level-badge");
+            }
+
             if (!state.upgradesVisible) overlayContainer.classList.add("hide-upgrades");
-            if (!state.monsterIconsVisible) overlayContainer.classList.add("hide-monster-icons");
-            if (!state.mapValueVisible || Number(state.mapValue) <= 0) overlayContainer.classList.add("hide-map-value");
-            if (!state.lostValueVisible || Number(state.lostValue) <= 0) overlayContainer.classList.add("hide-lost-value");
             overlayContainer.classList.toggle("is-value-wrap", Boolean(state.valueWrapEnabled));
-            if (!state.levelBadgeVisible) overlayContainer.classList.add("hide-level-badge");
             if (!state.upgradeTooltipsVisible) overlayContainer.classList.add("hide-upgrade-tooltips");
             if (!state.upgradeTooltipsVisible) overlayContainer.classList.add("hide-tooltips");
             if (!state.monsterHealthBarsVisible) overlayContainer.classList.add("hide-monster-health-bars");
@@ -1476,6 +1510,9 @@
             if (!state.respawnIndicatorVisible) overlayContainer.classList.add("hide-respawn-indicator");
             if (!state.respawnTimerVisible && !state.respawnIndicatorVisible) overlayContainer.classList.add("hide-respawn-status");
             overlayContainer.classList.toggle("is-upgrade-wrap-double", state.upgradeRows === "double");
+            overlayContainer.classList.remove("upgrades-align-left", "upgrades-align-center", "upgrades-align-right");
+            overlayContainer.classList.add(`upgrades-align-${state.upgradesAlignment}`);
+
             if (state.tabHidden) overlayContainer.classList.add("is-tab-hidden");
             if (overlayShouldBeVisible) overlayContainer.classList.add("is-visible");
             overlayHoverControls.classList.toggle("is-enabled", overlayShouldBeVisible && !state.tabHidden);
@@ -1618,6 +1655,10 @@
         overlayOnlyAliveIncludeUndetectedToggle.addEventListener("change", () => OverlayApp.setOnlyAliveIncludeUndetected(overlayOnlyAliveIncludeUndetectedToggle.checked));
         overlayLanguageRuBtn.addEventListener("click", () => OverlayApp.setInterfaceLanguage("ru"));
         overlayLanguageEnBtn.addEventListener("click", () => OverlayApp.setInterfaceLanguage("en"));
+        overlayShowInShopToggle.addEventListener("change", () => OverlayApp.setShowInShop(overlayShowInShopToggle.checked));
+        overlayUpgAlignmentButtons.forEach((button) => {
+            button.addEventListener("click", () => OverlayApp.setUpgradesAlignment(button.dataset.upgAlignment));
+        });
         [overlaySizeSlider, overlayUpgradeSizeSlider, overlayColumnsSlider, overlayHoverOpacitySlider].forEach((slider) => {
             slider.addEventListener("pointerup", () => slider.blur());
             slider.addEventListener("change", () => slider.blur());
