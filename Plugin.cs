@@ -125,7 +125,48 @@ namespace OverlayHUD
         private bool pendingCursorState = false;
         private float cursorStateChangeTime = 0f;
         private bool wasOverlayHidden = false;
-        private float focusLostTime = 0f; // <-- Добавь эту строку
+        private float focusLostTime = 0f;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        private uint cachedOverlayPid = 0;
+        private float nextOverlayPidCheck = 0f;
+
+        private bool IsOverlayFocused()
+        {
+            try
+            {
+                IntPtr fg = GetForegroundWindow();
+                if (fg == IntPtr.Zero) return false;
+                GetWindowThreadProcessId(fg, out uint pid);
+
+                if (launchedOverlayProcess != null && !launchedOverlayProcess.HasExited)
+                {
+                    if (pid == (uint)launchedOverlayProcess.Id) return true;
+                }
+
+                if (pid == cachedOverlayPid) return true;
+
+                if (Time.unscaledTime > nextOverlayPidCheck)
+                {
+                    nextOverlayPidCheck = Time.unscaledTime + 2f;
+                    using (Process p = Process.GetProcessById((int)pid))
+                    {
+                        if (p.ProcessName.IndexOf("overlay", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            cachedOverlayPid = pid;
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            catch { return false; }
+        }
 
         private ConfigEntry<string> endpoint, levelEndpoint, overlayAppRelativePath, overlayAppArchiveName;
         private ConfigEntry<float> scanInterval, statusInterval;
@@ -296,7 +337,10 @@ namespace OverlayHUD
             }
 
             // --- НОВЫЙ КОД: Умное скрытие оверлея ---
-            if (Application.isFocused)
+            bool isGameFocused = Application.isFocused;
+            bool isSafeFocused = isGameFocused || IsOverlayFocused();
+
+            if (isSafeFocused)
             {
                 focusLostTime = 0f;
                 if (wasOverlayHidden)
@@ -712,13 +756,11 @@ namespace OverlayHUD
                 {
                     if (CachedIsMasterClient())
                     {
-                        // У хоста таймер всегда правильный
                         remaining = realTimer;
                         instance.clientSimulatedTimers[id] = remaining;
                     }
                     else
                     {
-                        // У клиента: если пришла новая цифра по сети (отличается от нашей симуляции), обновляем
                         if (!instance.clientSimulatedTimers.TryGetValue(id, out float sim) || (realTimer > 0f && Math.Abs(realTimer - sim) > 1.5f))
                         {
                             instance.clientSimulatedTimers[id] = realTimer;
