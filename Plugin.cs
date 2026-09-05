@@ -32,7 +32,6 @@ namespace OverlayHUD
         private static readonly object reflectionCacheLock = new object();
         private static readonly object networkQueueLock = new object();
 
-        // Оптимизированный кэш Рефлексии (Больше никаких лагов от сборщика мусора!)
         private static readonly Dictionary<Type, Dictionary<string, MemberInfo>> fastMemberCache = new Dictionary<Type, Dictionary<string, MemberInfo>>();
         private static readonly Dictionary<Type, Dictionary<string, MethodInfo>> fastNoArgMethodCache = new Dictionary<Type, Dictionary<string, MethodInfo>>();
 
@@ -336,7 +335,6 @@ namespace OverlayHUD
                 return;
             }
 
-            // --- НОВЫЙ КОД: Умное скрытие оверлея ---
             bool isGameFocused = Application.isFocused;
             bool isSafeFocused = isGameFocused || IsOverlayFocused();
 
@@ -352,14 +350,12 @@ namespace OverlayHUD
             else
             {
                 focusLostTime += Time.unscaledDeltaTime;
-                // Ждем 0.5 секунды. Уведомления Windows крадут фокус лишь на мгновение.
                 if (focusLostTime > 0.5f && !wasOverlayHidden)
                 {
                     wasOverlayHidden = true;
                     if (gameObject.activeInHierarchy) StartCoroutine(PostTabHidden(true));
                 }
             }
-            // ----------------------------------------
 
             bool isCursorVisible = Cursor.visible;
             if (isCursorVisible != pendingCursorState)
@@ -601,7 +597,6 @@ namespace OverlayHUD
         private void AddMapValue(float delta, string reason) { if (CachedIsRunLevel(null) && !float.IsNaN(delta) && Math.Abs(delta) >= 0.01f) { mapValue = Math.Max(0f, mapValue + delta); MarkMapValueDirty(); } }
         private void AddLostValue(float value, string reason) { if (CachedIsRunLevel(null) && !float.IsNaN(value) && value >= 0.01f) { lostValue += value; MarkMapValueDirty(); } }
 
-        // ОПТИМИЗАЦИЯ: Увеличиваем задержку отправки стоимости лута, чтобы не лагало при смерти и лутании
         private void MarkMapValueDirty() { mapValueDirty = true; nextMapValueSyncAt = Time.realtimeSinceStartup + 1.0f; }
 
         private void SyncMapValueIfChanged()
@@ -948,6 +943,55 @@ namespace OverlayHUD
             return Time.realtimeSinceStartup - last >= 30f;
         }
 
+        private static bool IsNonGameplayLevelName(string levelName)
+        {
+            if (string.IsNullOrWhiteSpace(levelName)) return false;
+            string lower = levelName.ToLowerInvariant();
+            return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary");
+        }
+
+        private static bool IsNonGameplayContext()
+        {
+            Type runManagerType = AccessTools.TypeByName("RunManager");
+            object runManager = ReadMember(runManagerType, "instance");
+            return IsNonGameplayLevelName(DescribeLevelObject(ReadMember(runManager, "levelCurrent"))) || IsNonGameplayLevelName(SceneManager.GetActiveScene().name);
+        }
+
+        private static string DescribeCurrentLevel(object runManager) { return DescribeLevelObject(ReadMember(runManager, "levelCurrent")); }
+
+        private static string DescribeLevelObject(object currentLevel) { if (currentLevel == null) return "<null>"; if (currentLevel is UnityEngine.Object unityObject) return string.IsNullOrWhiteSpace(unityObject.name) ? unityObject.ToString() : unityObject.name; return currentLevel.ToString(); }
+
+        private static bool isRunLevelCache = false;
+        private static float nextRunLevelCheck = 0f;
+        private static bool CachedIsRunLevel(string sceneName)
+        {
+            if (sceneName != null)
+            {
+                if (IsNonGameplayLevelName(sceneName)) return false;
+                if (IsRunLevelName(sceneName) || sceneName.ToLowerInvariant().Contains("shop")) return true;
+            }
+            if (Time.unscaledTime > nextRunLevelCheck)
+            {
+                object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "RunIsLevel");
+                isRunLevelCache = (result is bool value && value) || SceneManager.GetActiveScene().name.ToLowerInvariant().Contains("shop");
+                nextRunLevelCheck = Time.unscaledTime + 1f;
+            }
+            return isRunLevelCache;
+        }
+
+        private static bool isMasterCache = false;
+        private static float nextMasterCheck = 0f;
+        private static bool CachedIsMasterClient()
+        {
+            if (Time.unscaledTime > nextMasterCheck)
+            {
+                object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "IsMasterClientOrSingleplayer");
+                isMasterCache = result is bool value ? value : false;
+                nextMasterCheck = Time.unscaledTime + 2f;
+            }
+            return isMasterCache;
+        }
+
         private int ResolveCurrentLevel()
         {
             Type runManagerType = AccessTools.TypeByName("RunManager");
@@ -985,7 +1029,6 @@ namespace OverlayHUD
             bool runLevel = !nonGameplayCurrent && CachedIsRunLevel(null);
             bool hasLevelGenerator = false;
 
-            // ДОБАВЛЕНО: Магазин не требует генерации уровня (LevelGenerator)
             bool isShop = currentLevelName.ToLowerInvariant().Contains("shop") || SceneManager.GetActiveScene().name.ToLowerInvariant().Contains("shop");
             bool levelGenerated = IsLevelGenerated() || !CachedIsMasterClient() || isShop;
 
@@ -1026,55 +1069,96 @@ namespace OverlayHUD
         private static bool IsNamedRunLevel(object currentLevel) { return IsRunLevelName(DescribeLevelObject(currentLevel)); }
         private static bool IsRunLevelName(string levelName) { return !string.IsNullOrWhiteSpace(levelName) && levelName.StartsWith("Level - ", StringComparison.Ordinal) && !IsNonGameplayLevelName(levelName); }
 
-        private static bool IsNonGameplayLevelName(string levelName)
+        private void SyncPlayerUpgradesIfChanged(HashSet<string> onlyKeys = null)
         {
-            if (string.IsNullOrWhiteSpace(levelName)) return false;
-            string lower = levelName.ToLowerInvariant();
-            return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary");
-        }
+            Type statsManagerType = AccessTools.TypeByName("StatsManager");
+            object statsManager = ReadMember(statsManagerType, "instance");
+            if (statsManager == null) return;
 
-        private static bool IsNonGameplayContext()
-        {
-            Type runManagerType = AccessTools.TypeByName("RunManager");
-            object runManager = ReadMember(runManagerType, "instance");
-            return IsNonGameplayLevelName(DescribeLevelObject(ReadMember(runManager, "levelCurrent"))) || IsNonGameplayLevelName(SceneManager.GetActiveScene().name);
-        }
-
-        private static string DescribeCurrentLevel(object runManager) { return DescribeLevelObject(ReadMember(runManager, "levelCurrent")); }
-        private static string DescribeLevelObject(object currentLevel) { if (currentLevel == null) return "<null>"; if (currentLevel is UnityEngine.Object unityObject) return string.IsNullOrWhiteSpace(unityObject.name) ? unityObject.ToString() : unityObject.name; return currentLevel.ToString(); }
-
-        // ОПТИМИЗАЦИЯ: Кэширование проверок состояния игры, чтобы не убивать ФПС
-        private static bool isRunLevelCache = false;
-        private static float nextRunLevelCheck = 0f;
-        private static bool CachedIsRunLevel(string sceneName)
-        {
-            if (sceneName != null)
+            var aliveSteamIds = new HashSet<string>();
+            Type playerAvatarType = AccessTools.TypeByName("PlayerAvatar");
+            if (playerAvatarType != null)
             {
-                if (IsNonGameplayLevelName(sceneName)) return false;
-                // ДОБАВЛЕНА ПРОВЕРКА МАГАЗИНА:
-                if (IsRunLevelName(sceneName) || sceneName.ToLowerInvariant().Contains("shop")) return true;
-            }
-            if (Time.unscaledTime > nextRunLevelCheck)
-            {
-                object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "RunIsLevel");
-                // ДОБАВЛЕНА ПРОВЕРКА МАГАЗИНА:
-                isRunLevelCache = (result is bool value && value) || SceneManager.GetActiveScene().name.ToLowerInvariant().Contains("shop");
-                nextRunLevelCheck = Time.unscaledTime + 1f;
-            }
-            return isRunLevelCache;
-        }
+                UnityEngine.Object[] avatars = Resources.FindObjectsOfTypeAll(playerAvatarType);
+                foreach (var avatar in avatars)
+                {
+                    if (avatar == null) continue;
+                    string id = ReadMember(avatar, "steamID") as string;
+                    if (string.IsNullOrEmpty(id)) continue;
 
-        private static bool isMasterCache = true;
-        private static float nextMasterCheck = 0f;
-        private static bool CachedIsMasterClient()
-        {
-            if (Time.unscaledTime > nextMasterCheck)
-            {
-                object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "IsMasterClientOrSingleplayer");
-                isMasterCache = !(result is bool value) || value;
-                nextMasterCheck = Time.unscaledTime + 2f;
+                    bool dead = false;
+                    object isDeadVal = ReadMember(avatar, "isDead");
+                    if (isDeadVal is bool b) dead = b;
+
+                    object hpVal = ReadMember(avatar, "playerHealth");
+                    if (hpVal != null && TryConvertFloat(hpVal, out float hp) && hp <= 0f) dead = true;
+
+                    if (!dead) aliveSteamIds.Add(id);
+                }
             }
-            return isMasterCache;
+
+            var upgradesByPlayer = new Dictionary<string, Dictionary<string, int>>();
+
+            for (int index = 0; index < TrackedPlayerUpgrades.Length; index++)
+            {
+                KeyValuePair<string, string> binding = TrackedPlayerUpgrades[index];
+                if (onlyKeys != null && !onlyKeys.Contains(binding.Key)) continue;
+
+                object upgradesValue = ReadMember(statsManager, binding.Value);
+                if (!(upgradesValue is IDictionary upgrades)) continue;
+
+                foreach (DictionaryEntry entry in upgrades)
+                {
+                    string steamId = entry.Key?.ToString();
+                    if (string.IsNullOrEmpty(steamId)) continue;
+
+                    if (aliveSteamIds.Count > 0 && !aliveSteamIds.Contains(steamId)) continue;
+
+                    int value = 0;
+                    try { value = Math.Max(0, Convert.ToInt32(entry.Value)); } catch { continue; }
+
+                    string cacheKey = steamId + "_" + binding.Key;
+                    if (lastSyncedUpgrades.TryGetValue(cacheKey, out int previousValue) && previousValue == value) continue;
+
+                    lastSyncedUpgrades[cacheKey] = value;
+
+                    if (!upgradesByPlayer.TryGetValue(steamId, out var playerUpgrades))
+                    {
+                        playerUpgrades = new Dictionary<string, int>();
+                        upgradesByPlayer[steamId] = playerUpgrades;
+                    }
+                    playerUpgrades[binding.Key] = value;
+                }
+            }
+
+            if (upgradesByPlayer.Count == 0) return;
+
+            string localId = ResolveLocalPlayerSteamId();
+            var json = new StringBuilder("{\"localSteamId\":\"").Append(localId).Append("\",\"players\":[");
+            int playerCount = 0;
+
+            foreach (var kvp in upgradesByPlayer)
+            {
+                string steamId = kvp.Key;
+                var playerUpgrades = kvp.Value;
+                if (playerUpgrades.Count == 0) continue;
+
+                string playerName = ResolvePlayerName(steamId) ?? ("Игрок " + steamId.Substring(0, Math.Min(4, steamId.Length)));
+
+                if (playerCount++ > 0) json.Append(',');
+                json.Append("{\"steamId\":\"").Append(steamId).Append("\",\"name\":\"").Append(EscapeJson(playerName)).Append("\",\"upgrades\":{");
+
+                int count = 0;
+                foreach (var upg in playerUpgrades)
+                {
+                    if (count++ > 0) json.Append(',');
+                    json.Append('\"').Append(upg.Key).Append("\":").Append(upg.Value);
+                }
+                json.Append("}}");
+            }
+            json.Append("]}");
+
+            if (gameObject.activeInHierarchy) StartCoroutine(PostPlayerUpgrades(json.ToString(), playerCount));
         }
 
         private static float CalculateMapValue()
@@ -1162,74 +1246,6 @@ namespace OverlayHUD
             pendingUpgradeKeys.Clear();
             for (int index = 0; index < TrackedPlayerUpgrades.Length; index++) pendingUpgradeKeys.Add(TrackedPlayerUpgrades[index].Key);
             nextUpgradeSyncAt = Time.realtimeSinceStartup + 2f;
-        }
-
-        private void SyncPlayerUpgradesIfChanged(HashSet<string> onlyKeys = null)
-        {
-            Type statsManagerType = AccessTools.TypeByName("StatsManager");
-            object statsManager = ReadMember(statsManagerType, "instance");
-            if (statsManager == null) return;
-
-            var upgradesByPlayer = new Dictionary<string, Dictionary<string, int>>();
-
-            for (int index = 0; index < TrackedPlayerUpgrades.Length; index++)
-            {
-                KeyValuePair<string, string> binding = TrackedPlayerUpgrades[index];
-                if (onlyKeys != null && !onlyKeys.Contains(binding.Key)) continue;
-
-                object upgradesValue = ReadMember(statsManager, binding.Value);
-                if (!(upgradesValue is IDictionary upgrades)) continue;
-
-                foreach (DictionaryEntry entry in upgrades)
-                {
-                    string steamId = entry.Key?.ToString();
-                    if (string.IsNullOrEmpty(steamId)) continue;
-
-                    int value = 0;
-                    try { value = Math.Max(0, Convert.ToInt32(entry.Value)); } catch { continue; }
-
-                    string cacheKey = steamId + "_" + binding.Key;
-                    if (lastSyncedUpgrades.TryGetValue(cacheKey, out int previousValue) && previousValue == value) continue;
-
-                    lastSyncedUpgrades[cacheKey] = value;
-
-                    if (!upgradesByPlayer.TryGetValue(steamId, out var playerUpgrades))
-                    {
-                        playerUpgrades = new Dictionary<string, int>();
-                        upgradesByPlayer[steamId] = playerUpgrades;
-                    }
-                    playerUpgrades[binding.Key] = value;
-                }
-            }
-
-            if (upgradesByPlayer.Count == 0) return;
-
-            string localId = ResolveLocalPlayerSteamId();
-            var json = new StringBuilder("{\"localSteamId\":\"").Append(localId).Append("\",\"players\":[");
-            int playerCount = 0;
-
-            foreach (var kvp in upgradesByPlayer)
-            {
-                string steamId = kvp.Key;
-                var playerUpgrades = kvp.Value;
-                if (playerUpgrades.Count == 0) continue;
-
-                string playerName = ResolvePlayerName(steamId) ?? ("Игрок " + steamId.Substring(0, Math.Min(4, steamId.Length)));
-
-                if (playerCount++ > 0) json.Append(',');
-                json.Append("{\"steamId\":\"").Append(steamId).Append("\",\"name\":\"").Append(EscapeJson(playerName)).Append("\",\"upgrades\":{");
-
-                int count = 0;
-                foreach (var upg in playerUpgrades)
-                {
-                    if (count++ > 0) json.Append(',');
-                    json.Append('\"').Append(upg.Key).Append("\":").Append(upg.Value);
-                }
-                json.Append("}}");
-            }
-            json.Append("]}");
-
-            if (gameObject.activeInHierarchy) StartCoroutine(PostPlayerUpgrades(json.ToString(), playerCount));
         }
 
         private static string ResolvePlayerName(string steamId)
@@ -1563,7 +1579,6 @@ namespace OverlayHUD
             return ReadIntMember(ReadMember(player, "photonView"), "ViewID");
         }
 
-        // ОПТИМИЗАЦИЯ РЕФЛЕКСИИ (Убирает лаги GC при чтении переменных)
         private static object ReadMember(object source, string memberName)
         {
             if (source == null) return null;
@@ -1854,6 +1869,8 @@ namespace OverlayHUD
             return split >= 0 ? response.Substring(split + 2) : "";
         }
 
+        private static string EscapeJson(string value) { return value.Replace("\\", "\\\\").Replace("\"", "\\\""); }
+
         private static string FindKnownMonster(string raw)
         {
             string key = Normalize(raw);
@@ -1868,8 +1885,6 @@ namespace OverlayHUD
             foreach (char ch in value.ToLowerInvariant()) if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) builder.Append(ch);
             return builder.ToString();
         }
-
-        private static string EscapeJson(string value) { return value.Replace("\\", "\\\\").Replace("\"", "\\\""); }
 
         private struct EnemyCandidate { public Component Component; public GameObject Root; public Vector3 Center; }
         private struct ResolvedEnemyCandidate { public EnemyCandidate Candidate; public string MonsterName; }

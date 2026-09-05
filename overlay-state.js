@@ -1,5 +1,5 @@
 const OverlayApp = (() => {
-    const storageKey = "overlay-control-state-v2";
+    const storageKey = "overlay-control-state-v4"; // Обновил версию ключа, чтобы сбросить кэш координат
     const channelName = "overlay-control-channel";
     const channel = "BroadcastChannel" in window ? new BroadcastChannel(channelName) : null;
     const serverSyncEnabled = window.location.protocol === "http:" || window.location.protocol === "https:";
@@ -131,6 +131,7 @@ const OverlayApp = (() => {
         const normalizedOverlayPosition = normalizePosition(source.overlayPosition);
         const overlayPosition = shouldMigrateOverlayDefaults && !normalizedOverlayPosition ? normalizePosition(defaultState.overlayPosition) : normalizedOverlayPosition;
         const controlsPosition = normalizePosition(source.controlsPosition);
+
         const timerVisible = shouldMigrateOverlayDefaults && source.timerVisible === false ? defaultState.timerVisible : Boolean(source.timerVisible);
         const upgradeTooltipsVisible = sourceOverlayDefaultsVersion < 3 && source.upgradeTooltipsVisible === true ? defaultState.upgradeTooltipsVisible : Boolean(source.upgradeTooltipsVisible);
         const valueWrapEnabled = sourceOverlayDefaultsVersion < 4 && source.valueWrapEnabled === false ? defaultState.valueWrapEnabled : Boolean(source.valueWrapEnabled);
@@ -140,8 +141,9 @@ const OverlayApp = (() => {
         const lostValue = normalizeCurrencyValue(source.lostValue, defaultState.lostValue);
         const upgradeVisibility = normalizeUpgradeVisibility(source.upgradeVisibility);
         const players = source.players && typeof source.players === "object" ? source.players : {};
+
         const normalizedUpgAlignment = ["left", "center", "right"].includes(source.upgradesAlignment) ? source.upgradesAlignment : defaultState.upgradesAlignment;
-        const showInShop = source.showInShop !== undefined ? Boolean(source.showInShop) : defaultState.showInShop;
+        const showInShop = source.showInShop !== undefined ? Boolean(source.showInShop) : true;
 
         return {
             ...defaultState,
