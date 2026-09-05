@@ -220,7 +220,7 @@
                             </span>
                         </label>
                         <label class="overlay-toggle-row">
-                            <span data-i18n="showInShop">Показывать в магазине</span>
+                            <span data-i18n="showInShop">В магазине</span>
                             <span class="overlay-toggle-switch">
                                 <input type="checkbox" id="overlayShowInShopToggle">
                                 <span></span>
@@ -257,6 +257,7 @@
                         <span class="lost-value-number" id="lostValueNumber">$0</span>
                     </div>
                 </div>
+                <!-- Возвращаем апгрейды в общий поток -->
                 <div class="upgrade-row" id="upgradeRow" aria-label="Player upgrades"></div>
             </div>
             <div class="monsters-squares" id="monstersSquares"></div>
@@ -733,8 +734,10 @@
 
         function applySavedPositionsWhenLayoutChanges(state) {
             const positionLayoutKey = getPositionLayoutKey(state);
-            const needsInitialPosition = Boolean((state.overlayPosition && !overlayContainer.style.getPropertyValue("--overlay-left"))
-                || (state.controlsPosition && !overlayHoverControls.style.getPropertyValue("--overlay-left")));
+            const needsInitialPosition = Boolean(
+                (state.overlayPosition && !overlayContainer.style.getPropertyValue("--overlay-left")) ||
+                (state.controlsPosition && !overlayHoverControls.style.getPropertyValue("--overlay-left"))
+            );
             if (!needsInitialPosition && positionLayoutKey === lastPositionLayoutKey) return;
 
             lastPositionLayoutKey = positionLayoutKey;
@@ -792,7 +795,6 @@
             try {
                 activeDrag.handle.releasePointerCapture(event.pointerId);
             } catch {
-                // The capture can already be gone if Electron briefly changed hit-testing.
             }
             if (activeDrag.targetName === "controls") {
                 OverlayApp.setControlsPosition(finalPosition);
@@ -816,7 +818,6 @@
             event.preventDefault();
         }
 
-        // Генерация уникального цвета на основе SteamID
         function stringToColor(str) {
             let hash = 0;
             for (let i = 0; i < str.length; i++) {
@@ -832,11 +833,9 @@
                 const playerContainer = document.createElement("div");
                 playerContainer.className = "player-upgrade-container";
 
-                // Назначаем уникальный цвет
                 const playerColor = stringToColor(steamId);
                 playerContainer.style.setProperty("--player-color", playerColor);
 
-                // Добавляем имя игрока
                 const nameLabel = document.createElement("div");
                 nameLabel.className = "player-name-label";
                 nameLabel.textContent = playerName || "Player";
@@ -876,7 +875,6 @@
                 upgradeRow.appendChild(playerContainer);
             }
 
-            // Обновляем имя, если оно подгрузилось позже
             const bundle = playerUpgradeElements.get(steamId);
             bundle.nameLabel.textContent = playerName || "Player";
             return bundle;
@@ -891,12 +889,10 @@
                 const playerData = players[steamId];
                 const playerBundle = getPlayerUpgradeElements(steamId, playerData.name);
 
-                // --- ФИЛЬТР ТОЛЬКО МОИ АПГРЕЙДЫ ---
                 if (state.onlyMyUpgrades && state.localSteamId && steamId !== state.localSteamId) {
                     playerBundle.container.style.display = "none";
                     continue;
                 }
-                // ----------------------------------
 
                 let playerVisibleCount = 0;
 
@@ -1381,15 +1377,23 @@
                 return;
             }
 
-            const hasMapValue = Boolean(latestState.mapValueVisible && Number(latestState.mapValue) > 0);
-            const hasLostValue = Boolean(latestState.lostValueVisible && Number(latestState.lostValue) > 0);
-            const hasHeader = Boolean(latestState.levelBadgeVisible || latestState.timerVisible || hasMapValue || hasLostValue);
+            const isShop = (latestState.levelName || "").toLowerCase().includes("shop");
+            const hideMapValue = !latestState.mapValueVisible || Number(latestState.mapValue) <= 0 || isShop;
+            const hideLostValue = !latestState.lostValueVisible || Number(latestState.lostValue) <= 0 || isShop;
+            const hasHeader = (!isShop && (latestState.levelBadgeVisible || latestState.timerVisible)) || !hideMapValue || !hideLostValue;
+
             const visibleUpgrades = [...upgradeRow.querySelectorAll(".upgrade-stat")].filter((element) => !element.classList.contains("is-zero"));
-            const hasUpgrades = Boolean(latestState.upgradesVisible && visibleUpgrades.length > 0);
+            const hideUpgrades = !latestState.upgradesVisible || (isShop && !latestState.showInShop);
+            const hasUpgrades = !hideUpgrades && visibleUpgrades.length > 0;
+
             overlayContainer.classList.toggle("is-topbar-inline", latestState.compactModeEnabled && hasHeader && hasUpgrades);
         }
 
         function render(state) {
+            overlayShowInShopToggle.checked = state.showInShop;
+            overlayUpgAlignmentButtons.forEach((button) => {
+                button.classList.toggle("is-active", button.dataset.upgAlignment === state.upgradesAlignment);
+            });
             const previousState = latestState;
             const keepInlineUntilUpgradesHidden = overlayContainer.classList.contains("is-topbar-inline") && !state.upgradesVisible;
             const keepInlineUntilHeaderHidden = overlayContainer.classList.contains("is-topbar-inline")
@@ -1443,11 +1447,7 @@
             overlayTimerToggle.checked = state.timerVisible;
             overlayUpgradesToggle.checked = state.upgradesVisible;
             overlayOnlyMyUpgradesToggle.checked = state.onlyMyUpgrades;
-            overlayShowInShopToggle.checked = state.showInShop;
-            overlayUpgAlignmentButtons.forEach((button) => {
-                const isActive = button.dataset.upgAlignment === state.upgradesAlignment;
-                button.classList.toggle("is-active", isActive);
-            });
+
             overlayMonsterIconsToggle.checked = state.monsterIconsVisible;
             overlayMapValueToggle.checked = state.mapValueVisible;
             overlayLostValueToggle.checked = state.lostValueVisible;
@@ -1476,7 +1476,13 @@
             const hasMonsterIconSlots = true;
 
             const isShop = (state.levelName || "").toLowerCase().includes("shop");
-            const overlayShouldBeVisible = Boolean(state.gameplayVisible && hasMonsterIconSlots) && (!isShop || state.showInShop);
+
+            const hideMapValue = !state.mapValueVisible || Number(state.mapValue) <= 0 || isShop;
+            const hideLostValue = !state.lostValueVisible || Number(state.lostValue) <= 0 || isShop;
+            const hideLevelBadge = !state.levelBadgeVisible || isShop;
+            const hideTimer = !state.timerVisible || isShop;
+            const hideMonsters = !state.monsterIconsVisible || isShop;
+            const hideUpgrades = !state.upgradesVisible || (isShop && !state.showInShop);
 
             const keepOverlayPositioned = overlayContainer.classList.contains("is-positioned");
             const keepOverlayDragging = overlayContainer.classList.contains("is-dragging");
@@ -1486,36 +1492,37 @@
             overlayContainer.classList.toggle("is-anchor-center-y", !keepOverlayDragging && Boolean(state.overlayPosition && state.overlayPosition.anchorY === "center"));
             overlayContainer.classList.toggle("is-dragging", keepOverlayDragging);
             overlayContainer.classList.add(`align-${state.overlayAlignment}`);
-            if (keepInlineUntilUpgradesHidden || keepInlineUntilHeaderHidden) overlayContainer.classList.add("is-topbar-inline");
+            overlayContainer.classList.add(`upgrades-align-${state.upgradesAlignment}`);
+
             if (state.bgEnabled) overlayContainer.classList.add("with-bg");
 
-            if (isShop && state.showInShop) {
-                overlayContainer.classList.add("hide-monster-icons", "hide-level-badge", "hide-level-timer", "hide-map-value", "hide-lost-value");
-            } else {
-                if (!state.timerVisible) overlayContainer.classList.add("hide-level-timer");
-                if (!state.monsterIconsVisible) overlayContainer.classList.add("hide-monster-icons");
-                if (!state.mapValueVisible || Number(state.mapValue) <= 0) overlayContainer.classList.add("hide-map-value");
-                if (!state.lostValueVisible || Number(state.lostValue) <= 0) overlayContainer.classList.add("hide-lost-value");
-                if (!state.levelBadgeVisible) overlayContainer.classList.add("hide-level-badge");
-            }
+            if (hideTimer) overlayContainer.classList.add("hide-level-timer");
+            if (hideMonsters) overlayContainer.classList.add("hide-monster-icons");
+            if (hideMapValue) overlayContainer.classList.add("hide-map-value");
+            if (hideLostValue) overlayContainer.classList.add("hide-lost-value");
+            if (hideLevelBadge) overlayContainer.classList.add("hide-level-badge");
+            if (hideUpgrades) overlayContainer.classList.add("hide-upgrades");
 
-            if (!state.upgradesVisible) overlayContainer.classList.add("hide-upgrades");
             overlayContainer.classList.toggle("is-value-wrap", Boolean(state.valueWrapEnabled));
-            if (!state.upgradeTooltipsVisible) overlayContainer.classList.add("hide-upgrade-tooltips");
-            if (!state.upgradeTooltipsVisible) overlayContainer.classList.add("hide-tooltips");
+            overlayContainer.classList.toggle("is-upgrade-wrap-double", state.upgradeRows === "double");
+
             if (!state.monsterHealthBarsVisible) overlayContainer.classList.add("hide-monster-health-bars");
             if (!state.monsterProximityWavesVisible) overlayContainer.classList.add("hide-monster-proximity-waves");
             if (!state.monsterStrengthVisible) overlayContainer.classList.add("hide-monster-strength");
             if (!state.respawnTimerVisible) overlayContainer.classList.add("hide-respawn-timer");
             if (!state.respawnIndicatorVisible) overlayContainer.classList.add("hide-respawn-indicator");
             if (!state.respawnTimerVisible && !state.respawnIndicatorVisible) overlayContainer.classList.add("hide-respawn-status");
-            overlayContainer.classList.toggle("is-upgrade-wrap-double", state.upgradeRows === "double");
-            overlayContainer.classList.remove("upgrades-align-left", "upgrades-align-center", "upgrades-align-right");
-            overlayContainer.classList.add(`upgrades-align-${state.upgradesAlignment}`);
+            if (!state.upgradeTooltipsVisible) overlayContainer.classList.add("hide-upgrade-tooltips", "hide-tooltips");
 
             if (state.tabHidden) overlayContainer.classList.add("is-tab-hidden");
-            if (overlayShouldBeVisible) overlayContainer.classList.add("is-visible");
-            overlayHoverControls.classList.toggle("is-enabled", overlayShouldBeVisible && !state.tabHidden);
+
+            if (Boolean(state.gameplayVisible && hasMonsterIconSlots)) {
+                if (!(hideMonsters && hideMapValue && hideLostValue && hideLevelBadge && hideTimer && hideUpgrades)) {
+                    overlayContainer.classList.add("is-visible");
+                }
+            }
+
+            overlayHoverControls.classList.toggle("is-enabled", Boolean(state.gameplayVisible) && !state.tabHidden);
 
             levelNumber.textContent = state.level;
             mapValueNumber.textContent = formatCurrency(state.mapValue);
@@ -1606,7 +1613,6 @@
             try {
                 localStorage.setItem(controlTabStorageKey, targetTab);
             } catch {
-                /* ignore storage errors */
             }
             applySavedPositions();
             reclampPositionedElement(overlayHoverControls);

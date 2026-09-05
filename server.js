@@ -332,6 +332,8 @@ function updateMonsterStatuses(rawStatuses) {
             remaining = Math.min(...remainingValues);
         } else if (slot.respawnEndsAt != null) {
             remaining = Math.max(0, (Number(slot.respawnEndsAt) - now) / 1000);
+        } else {
+            remaining = 60;
         }
 
         const existingEnd = Number(slot.respawnEndsAt), projectedRemaining = Number.isFinite(existingEnd) ? Math.max(0, (existingEnd - now) / 1000) : null;
@@ -356,9 +358,10 @@ function setGameLevel(rawLevel, rawLevelName) {
         ...defaultOverlayState,
         ...(normalizeOverlayState(overlayState) || {}),
         level, levelName: String(rawLevelName || ""), gameplayVisible: true,
-        players: {}, localSteamId: null, // <-- СБРОС ИГРОКОВ И АПГРЕЙДОВ ПЕРЕД НОВОЙ ИГРОЙ
+        players: {}, localSteamId: null, // <-- ПОЛНЫЙ СБРОС АПГРЕЙДОВ ПРИ СТАРТЕ
         ...defaultPlayerUpgrades, seconds: 0, running: true, startedAt: Date.now(),
-        monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0
+        monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0,
+        upgradesPosition: overlayState?.upgradesPosition || null // Сохраняем позицию рамки
     };
     return { ok: true, statusCode: 200, payload: { ok: true, level } };
 }

@@ -170,7 +170,7 @@ body {
     gap: 7px;
     max-width: 190px;
     min-height: 38px;
-    /* margin-left: 10px;  <-- ÓÄÀËÈ ÝÒÓ ÑÒÐÎÊÓ */
+    margin-left: 10px;
     margin-bottom: 0;
     padding: 4px 11px 3px;
     overflow: hidden;
@@ -181,7 +181,14 @@ body {
     opacity: 1;
     transform: translateY(0) scale(1);
     transform-origin: left center;
-    transition: max-width var(--overlay-layout-duration) var(--overlay-reveal-ease), min-height var(--overlay-layout-duration) var(--overlay-reveal-ease), margin-left var(--overlay-layout-duration) var(--overlay-reveal-ease), margin-bottom var(--overlay-layout-duration) var(--overlay-reveal-ease), padding var(--overlay-layout-duration) var(--overlay-reveal-ease), opacity var(--overlay-reveal-duration) ease, transform var(--overlay-reveal-duration) var(--overlay-reveal-ease), visibility 0s linear 0s;
+    transition: max-width var(--overlay-layout-duration) var(--overlay-reveal-ease),
+        min-height var(--overlay-layout-duration) var(--overlay-reveal-ease),
+        margin-left var(--overlay-layout-duration) var(--overlay-reveal-ease),
+        margin-bottom var(--overlay-layout-duration) var(--overlay-reveal-ease),
+        padding var(--overlay-layout-duration) var(--overlay-reveal-ease),
+        opacity var(--overlay-reveal-duration) ease,
+        transform var(--overlay-reveal-duration) var(--overlay-reveal-ease),
+        visibility 0s linear 0s;
     visibility: visible;
 }
 
@@ -309,14 +316,17 @@ body {
     display: flex;
     align-items: center;
     justify-content: start;
-    gap: 10px; /* Áûëî 0 */
+    gap: 0;
     max-height: 58px;
     margin-bottom: 6px;
-    /* ... îñòàëüíîé êîä ... */
     overflow: visible;
     opacity: 1;
     transform: translateY(0);
-    transition: max-height var(--overlay-layout-duration) var(--overlay-reveal-ease), margin-bottom var(--overlay-layout-duration) var(--overlay-reveal-ease), opacity var(--overlay-reveal-duration) ease, transform var(--overlay-reveal-duration) var(--overlay-reveal-ease), visibility 0s linear 0s;
+    transition: max-height var(--overlay-layout-duration) var(--overlay-reveal-ease),
+        margin-bottom var(--overlay-layout-duration) var(--overlay-reveal-ease),
+        opacity var(--overlay-reveal-duration) ease,
+        transform var(--overlay-reveal-duration) var(--overlay-reveal-ease),
+        visibility 0s linear 0s;
     visibility: visible;
 }
 
