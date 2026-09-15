@@ -947,7 +947,7 @@ namespace OverlayHUD
         {
             if (string.IsNullOrWhiteSpace(levelName)) return false;
             string lower = levelName.ToLowerInvariant();
-            return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary");
+            return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary") || lower.Contains("arena");
         }
 
         private static bool IsNonGameplayContext()
