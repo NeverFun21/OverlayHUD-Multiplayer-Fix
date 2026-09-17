@@ -947,7 +947,7 @@ namespace OverlayHUD
         {
             if (string.IsNullOrWhiteSpace(levelName)) return false;
             string lower = levelName.ToLowerInvariant();
-            return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary");
+            return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary") || lower.Contains("arena");
         }
 
         private static bool IsNonGameplayContext()
@@ -1728,7 +1728,8 @@ namespace OverlayHUD
 
         private static string BuildFallbackStateJson(int level, string getStateResult)
         {
-            string stateObject = ExtractJsonObjectProperty(ExtractHttpBody(getStateResult), "state");
+            // Здесь мы удалили ExtractHttpBody, так как новый код сразу возвращает чистый JSON
+            string stateObject = ExtractJsonObjectProperty(getStateResult, "state");
             if (string.IsNullOrWhiteSpace(stateObject)) stateObject = "{}";
             stateObject = SetJsonNumberProperty(stateObject, "level", level);
             stateObject = SetJsonBooleanProperty(stateObject, "gameplayVisible", true);
@@ -1779,41 +1780,29 @@ namespace OverlayHUD
             return null;
         }
 
-        private static bool IsHttpSuccess(string result) { return result != null && (result.StartsWith("HTTP/1.1 2", StringComparison.Ordinal) || result.StartsWith("HTTP/1.0 2", StringComparison.Ordinal)); }
-        private static string TrimHttpResult(string result) { if (string.IsNullOrEmpty(result)) return "empty response"; int lineEnd = result.IndexOf('\n'); string firstLine = lineEnd >= 0 ? result.Substring(0, lineEnd) : result; if (firstLine.StartsWith("ERROR:", StringComparison.Ordinal)) return firstLine.Substring(6); return firstLine.Trim(); }
-
+        // --- НОВЫЙ ОПТИМИЗИРОВАННЫЙ СЕТЕВОЙ КОД ---
         private static string SendHttpPost(string endpointUrl, string json)
         {
             try
             {
-                var uri = new Uri(endpointUrl);
-                if (!string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase)) return "ERROR:Only http:// endpoints are supported by the raw bridge client.";
-                int port = uri.IsDefaultPort ? 80 : uri.Port;
+                var request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(endpointUrl);
+                request.Method = "POST";
+                request.ContentType = "application/json";
+                request.KeepAlive = true; // Вот эта магия спасет наш пинг
+                request.Timeout = 2000;
+
                 byte[] body = Encoding.UTF8.GetBytes(json);
-                string path = string.IsNullOrEmpty(uri.PathAndQuery) ? "/" : uri.PathAndQuery;
+                request.ContentLength = body.Length;
 
-                using (var client = new TcpClient())
+                using (Stream stream = request.GetRequestStream())
                 {
-                    IAsyncResult connect = client.BeginConnect(uri.Host, port, null, null);
-                    if (!connect.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2))) return "ERROR:Connection timed out.";
-                    client.EndConnect(connect); client.ReceiveTimeout = 2000; client.SendTimeout = 2000;
+                    stream.Write(body, 0, body.Length);
+                }
 
-                    using (NetworkStream stream = client.GetStream())
-                    using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true))
-                    using (var reader = new StreamReader(stream, Encoding.UTF8, false, 1024, true))
-                    {
-                        writer.NewLine = "\r\n";
-                        writer.WriteLine("POST " + path + " HTTP/1.1");
-                        writer.WriteLine("Host: " + uri.Host + ":" + port);
-                        writer.WriteLine("Content-Type: application/json");
-                        writer.WriteLine("Content-Length: " + body.Length);
-                        writer.WriteLine("Connection: close");
-                        writer.WriteLine();
-                        writer.Flush();
-                        stream.Write(body, 0, body.Length);
-                        stream.Flush();
-                        return ReadHttpResponse(reader);
-                    }
+                using (var response = (System.Net.HttpWebResponse)request.GetResponse())
+                using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                {
+                    return reader.ReadToEnd();
                 }
             }
             catch (Exception error) { return "ERROR:" + error.GetType().Name + ": " + error.Message; }
@@ -1823,53 +1812,20 @@ namespace OverlayHUD
         {
             try
             {
-                var uri = new Uri(endpointUrl);
-                if (!string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase)) return "ERROR:Only http:// endpoints are supported by the raw bridge client.";
-                int port = uri.IsDefaultPort ? 80 : uri.Port;
-                string path = string.IsNullOrEmpty(uri.PathAndQuery) ? "/" : uri.PathAndQuery;
+                var request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(endpointUrl);
+                request.Method = "GET";
+                request.KeepAlive = true;
+                request.Timeout = 2000;
 
-                using (var client = new TcpClient())
+                using (var response = (System.Net.HttpWebResponse)request.GetResponse())
+                using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
                 {
-                    IAsyncResult connect = client.BeginConnect(uri.Host, port, null, null);
-                    if (!connect.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2))) return "ERROR:Connection timed out.";
-                    client.EndConnect(connect); client.ReceiveTimeout = 2000; client.SendTimeout = 2000;
-
-                    using (NetworkStream stream = client.GetStream())
-                    using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, true))
-                    using (var reader = new StreamReader(stream, Encoding.UTF8, false, 1024, true))
-                    {
-                        writer.NewLine = "\r\n";
-                        writer.WriteLine("GET " + path + " HTTP/1.1");
-                        writer.WriteLine("Host: " + uri.Host + ":" + port);
-                        writer.WriteLine("Connection: close");
-                        writer.WriteLine();
-                        writer.Flush();
-                        return ReadHttpResponse(reader);
-                    }
+                    return reader.ReadToEnd();
                 }
             }
             catch (Exception error) { return "ERROR:" + error.GetType().Name + ": " + error.Message; }
         }
-
-        private static string ReadHttpResponse(StreamReader reader)
-        {
-            string status = reader.ReadLine();
-            if (string.IsNullOrEmpty(status)) return "ERROR:Empty HTTP response.";
-            var builder = new StringBuilder(); builder.AppendLine(status);
-            string line; while ((line = reader.ReadLine()) != null) builder.AppendLine(line);
-            return builder.ToString();
-        }
-
-        private static string ExtractHttpBody(string response)
-        {
-            if (string.IsNullOrEmpty(response)) return "";
-            int split = response.IndexOf("\r\n\r\n", StringComparison.Ordinal);
-            if (split >= 0) return response.Substring(split + 4);
-            split = response.IndexOf("\n\n", StringComparison.Ordinal);
-            return split >= 0 ? response.Substring(split + 2) : "";
-        }
-
-        private static string EscapeJson(string value) { return value.Replace("\\", "\\\\").Replace("\"", "\\\""); }
+        // ------------------------------------------
 
         private static string FindKnownMonster(string raw)
         {
@@ -1885,6 +1841,8 @@ namespace OverlayHUD
             foreach (char ch in value.ToLowerInvariant()) if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) builder.Append(ch);
             return builder.ToString();
         }
+
+        private static string EscapeJson(string value) { return value.Replace("\\", "\\\\").Replace("\"", "\\\""); }
 
         private struct EnemyCandidate { public Component Component; public GameObject Root; public Vector3 Center; }
         private struct ResolvedEnemyCandidate { public EnemyCandidate Candidate; public string MonsterName; }
