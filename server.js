@@ -333,7 +333,7 @@ function updateMonsterStatuses(rawStatuses) {
         } else if (slot.respawnEndsAt != null) {
             remaining = Math.max(0, (Number(slot.respawnEndsAt) - now) / 1000);
         } else {
-            remaining = 60;
+            remaining = 0;
         }
 
         const existingEnd = Number(slot.respawnEndsAt), projectedRemaining = Number.isFinite(existingEnd) ? Math.max(0, (existingEnd - now) / 1000) : null;
@@ -354,14 +354,26 @@ function setGameLevel(rawLevel, rawLevelName) {
     if (level == null) return { ok: false, statusCode: 422, payload: { error: "Invalid level", received: rawLevel } };
     startTimestampLine(level, rawLevelName);
     proximityBySourceId.clear();
+
+    const currentState = normalizeOverlayState(overlayState) || {};
+
     overlayState = {
         ...defaultOverlayState,
-        ...(normalizeOverlayState(overlayState) || {}),
-        level, levelName: String(rawLevelName || ""), gameplayVisible: true,
-        players: {}, localSteamId: null, // <-- ПОЛНЫЙ СБРОС АПГРЕЙДОВ ПРИ СТАРТЕ
-        ...defaultPlayerUpgrades, seconds: 0, running: true, startedAt: Date.now(),
-        monsters: [], roster: [], rosterPending: false, mapValue: 0, mapValueInitial: 0, mapValueGoal: null, lostValue: 0,
-        upgradesPosition: overlayState?.upgradesPosition || null // Сохраняем позицию рамки
+        ...currentState,
+        level,
+        levelName: String(rawLevelName || ""),
+        gameplayVisible: true,
+        // Убрано жесткое стирание players и апгрейдов, чтобы они сохранялись при переходе в магазин!
+        seconds: 0,
+        running: true,
+        startedAt: Date.now(),
+        monsters: [],
+        roster: [],
+        rosterPending: false,
+        mapValue: 0,
+        mapValueInitial: 0,
+        mapValueGoal: null,
+        lostValue: 0
     };
     return { ok: true, statusCode: 200, payload: { ok: true, level } };
 }
