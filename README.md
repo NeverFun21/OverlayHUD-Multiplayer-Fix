@@ -18,10 +18,10 @@
 ## 👁‍🗨 Как выглядит OverlayHUD
 
 **HUD во время игры:**  
-![OverlayHUD во время игры](docs/images/overlayhud-example.jpg)
+![OverlayHUD во время игры](https://raw.githubusercontent.com/Dunweir/OverlayHUD-repo/master/docs/images/overlayhud-example.jpg)
 
 **Панель настроек:**  
-![Панель настроек OverlayHUD](docs/images/overlayhud-settings.jpg)
+![Панель настроек OverlayHUD](https://raw.githubusercontent.com/Dunweir/OverlayHUD-repo/master/docs/images/overlayhud-settings.jpg)
 
 ## ⚙️ Возможности оверлея
 
