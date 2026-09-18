@@ -302,6 +302,7 @@ function updateMonsterStatuses(rawStatuses) {
     if (!Array.isArray(rawStatuses)) return { ok: false, statusCode: 422, payload: { error: "Invalid monster statuses" } };
     const state = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}), monsters: Array.isArray(overlayState?.monsters) ? overlayState.monsters : [], roster: Array.isArray(overlayState?.roster) ? overlayState.roster : [] };
     const statuses = new Map();
+
     for (const rawStatus of rawStatuses) {
         if (rawStatus?.id == null || typeof rawStatus.alive !== "boolean") continue;
         const remaining = Number(rawStatus.respawnRemaining), health = Number(rawStatus.health), maxHealth = Number(rawStatus.maxHealth);
@@ -312,6 +313,33 @@ function updateMonsterStatuses(rawStatuses) {
         proximityBySourceId.set(sourceId, proximity);
         statuses.set(sourceId, { alive: rawStatus.alive, respawnRemaining: Number.isFinite(remaining) ? Math.max(0, remaining) : 0, health: hasHealth ? Math.max(0, health) : null, maxHealth: hasMaxHealth ? Math.max(0, maxHealth) : null, ...proximity });
     }
+
+    // НОВЫЙ БЛОК: Авто-создание слотов ростера для клиентов в мультиплеере
+    for (const sourceId of statuses.keys()) {
+        let slot = state.roster.find((s) => Array.isArray(s.sourceIds) && s.sourceIds.includes(sourceId));
+        if (!slot) {
+            const monster = state.monsters.find((m) => m.sourceId === `enemy:${sourceId}` || m.sourceId === sourceId);
+            if (monster) {
+                const level = getMonsterLevel(monster.name);
+                const isReplacement = level === 3 && !monsterConfig.levels[3].includes(monster.name);
+                const groupSize = getMonsterCount(monster.name, level, isReplacement);
+                const groupKey = groupSize == null ? null : normalizeMonsterKey(monster.name);
+                if (groupKey != null) {
+                    const groupSlots = state.roster.filter((entry) => entry.groupKey === groupKey);
+                    slot = groupSlots.find((entry) => entry.sourceIds.length < groupSize);
+                    if (!slot) {
+                        slot = { id: `group:${groupKey}:${groupSlots.length + 1}`, level, groupKey, sourceIds: [] };
+                        state.roster.push(slot);
+                    }
+                } else {
+                    slot = { id: `enemy:${sourceId}`, level, sourceIds: [] };
+                    state.roster.push(slot);
+                }
+                slot.sourceIds.push(sourceId);
+            }
+        }
+    }
+
     const now = Date.now();
     let updatedSlots = 0;
     const roster = state.roster.map((slot) => {

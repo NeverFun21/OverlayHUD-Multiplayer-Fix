@@ -1547,10 +1547,22 @@
                     if (isDetected) return false;
                     return !state.onlyAliveIncludeUndetected;
                 });
-                ensureMonsterSquares(visibleRoster.length);
+
+                // ИСПРАВЛЕНИЕ: Держим пустые слоты (вопросики) на клиенте
+                const counts = OverlayApp.getCountsForLevel(state.level);
+                const expectedTotal = counts.level1 + counts.level2 + counts.level3;
+                const targetCount = Math.max(expectedTotal, visibleRoster.length);
+
+                ensureMonsterSquares(targetCount);
+
                 visibleRoster.forEach((slot, index) => {
                     updateMonsterSquare(monstersSquares.children[index], slot.level, revealedBySource.get(String(slot.id)), state.strength, slot);
                 });
+
+                // Заполняем оставшиеся пустые места вопросиками
+                for (let i = visibleRoster.length; i < targetCount; i++) {
+                    updateMonsterSquare(monstersSquares.children[i], 1, null, state.strength, null);
+                }
             } else {
                 const counts = OverlayApp.getCountsForLevel(state.level);
                 const totalCount = counts.level1 + counts.level2 + counts.level3;
