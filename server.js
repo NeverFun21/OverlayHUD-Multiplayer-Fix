@@ -52,7 +52,7 @@ const defaultPlayerUpgrades = {
 
 const allUpgradeKeys = Object.keys(defaultPlayerUpgrades);
 const defaultUpgradeVisibility = allUpgradeKeys.reduce((accumulator, key) => {
-    accumulator[key] = true;
+    accumulator[key] = (key !== "health" && key !== "stamina"); // <-- Замени на эту строчку
     return accumulator;
 }, {});
 
@@ -64,7 +64,7 @@ const defaultOverlayState = {
     valueWrapEnabled: true, monsterIconsVisible: true, levelBadgeVisible: true,
     upgradeTooltipsVisible: false, monsterHealthBarsVisible: true, monsterProximityWavesVisible: true,
     monsterStrengthVisible: true, respawnTimerVisible: true, respawnIndicatorVisible: true,
-    onlyAliveMonstersVisible: false, onlyAliveIncludeUndetected: false, squareSize: 70, upgradeSize: 38,
+    onlyAliveMonstersVisible: false, onlyAliveIncludeUndetected: false, squareSize: 54, upgradeSize: 24,
     overlayScaleVersion: 3, columnsCount: 11, columnsLayoutVersion: 2, overlayDefaultsVersion: 4,
     overlayAlignment: "center", overlayPosition: { left: 0, top: 0, anchorX: "center", anchorY: "top" },
     controlsPosition: null, hoverOpacity: 50, seconds: 0, running: false, startedAt: null,
@@ -437,19 +437,35 @@ function setPlayerUpgrades(rawPayload) {
     if (!rawPayload || !Array.isArray(rawPayload.players)) return { ok: false, statusCode: 422, payload: { error: "Invalid players payload" } };
     const state = { ...defaultOverlayState, ...(normalizeOverlayState(overlayState) || {}) };
     const players = state.players || {};
+
+    const activeSteamIds = new Set(rawPayload.players.map(p => p.steamId));
+
+    for (const steamId of Object.keys(players)) {
+        if (!activeSteamIds.has(steamId)) {
+            delete players[steamId];
+        }
+    }
+
     for (const playerData of rawPayload.players) {
         const steamId = playerData.steamId;
         const playerName = playerData.name;
         const rawUpgrades = playerData.upgrades || {};
         const updates = {};
         for (const key of Object.keys(defaultPlayerUpgrades)) {
-            if (!(key in rawUpgrades)) continue;
-            const value = Number(rawUpgrades[key]);
+            const value = (key in rawUpgrades) ? Number(rawUpgrades[key]) : 0;
             if (Number.isFinite(value) && value >= 0) updates[key] = Math.floor(value);
         }
-        players[steamId] = { ...(players[steamId] || defaultPlayerUpgrades), ...updates, name: playerName };
+        players[steamId] = { ...defaultPlayerUpgrades, ...updates, name: playerName };
     }
-    if (rawPayload.localSteamId !== undefined) { state.localSteamId = rawPayload.localSteamId; }
+
+    // ИСПРАВЛЕНИЕ: Блок присвоения силы и локального ID
+    if (rawPayload.localSteamId !== undefined) {
+        state.localSteamId = rawPayload.localSteamId;
+        if (players[state.localSteamId] && players[state.localSteamId].strength !== undefined) {
+            state.strength = players[state.localSteamId].strength;
+        }
+    }
+
     overlayState = { ...state, players };
     return { ok: true, statusCode: 200, payload: { ok: true, processedPlayers: rawPayload.players.length } };
 }

@@ -43,7 +43,7 @@ namespace OverlayHUD
         private static readonly Dictionary<string, string> KnownMonsters = new Dictionary<string, string> { { "apexpredator", "Apex Predator" }, { "animal", "Animal" }, { "banger", "Banger" }, { "bang", "Banger" }, { "bella", "Bella" }, { "beamer", "Clown" }, { "birthdayboy", "Birthday Boy" }, { "bowtie", "Bowtie" }, { "chef", "Chef" }, { "cheffrog", "Chef" }, { "ceilingeye", "Peeper" }, { "cleanupcrew", "Cleanup Crew" }, { "clown", "Clown" }, { "clownbeamer", "Clown" }, { "duck", "Rugrat" }, { "elsa", "Elsa" }, { "floater", "Mentalist" }, { "gambit", "Gambit" }, { "gnome", "Gnomes" }, { "headgrab", "Headgrab" }, { "headgrabber", "Headgrab" }, { "headman", "Headman" }, { "hearthugger", "Heart Hugger" }, { "hidden", "Hidden" }, { "huntsman", "Huntsman" }, { "hunter", "Huntsman" }, { "loom", "Loom" }, { "mentalist", "Mentalist" }, { "oogly", "Oogly" }, { "peeper", "Peeper" }, { "reaper", "Reaper" }, { "robe", "Robe" }, { "rugrat", "Rugrat" }, { "runner", "Gambit" }, { "shadowchild", "Shadow Child" }, { "shadow", "Shadow Child" }, { "spewer", "Spewer" }, { "slowmouth", "Spewer" }, { "slowwalker", "Trudge" }, { "spinny", "Bowtie" }, { "thinman", "Reaper" }, { "tick", "Tick" }, { "trudge", "Trudge" }, { "tricycle", "Birthday Boy" }, { "tumbler", "Apex Predator" }, { "upscream", "Upscream" }, { "valuablethrower", "Rugrat" } };
         private static readonly KeyValuePair<string, string>[] TrackedPlayerUpgrades = { new KeyValuePair<string, string>("strength", "playerUpgradeStrength"), new KeyValuePair<string, string>("tumbleLaunch", "playerUpgradeLaunch"), new KeyValuePair<string, string>("range", "playerUpgradeRange"), new KeyValuePair<string, string>("sprintSpeed", "playerUpgradeSpeed"), new KeyValuePair<string, string>("tumbleWings", "playerUpgradeTumbleWings"), new KeyValuePair<string, string>("crouchRest", "playerUpgradeCrouchRest"), new KeyValuePair<string, string>("extraJump", "playerUpgradeExtraJump"), new KeyValuePair<string, string>("tumbleClimb", "playerUpgradeTumbleClimb"), new KeyValuePair<string, string>("health", "playerUpgradeHealth"), new KeyValuePair<string, string>("stamina", "playerUpgradeStamina"), new KeyValuePair<string, string>("mapPlayerCount", "playerUpgradeMapPlayerCount"), new KeyValuePair<string, string>("deathHeadBattery", "playerUpgradeDeathHeadBattery") };
         private static readonly Dictionary<string, string> UpgradeStateKeyByPunMethod = new Dictionary<string, string> { { "UpgradePlayerGrabStrength", "strength" }, { "UpgradePlayerTumbleLaunch", "tumbleLaunch" }, { "UpgradePlayerGrabRange", "range" }, { "UpgradePlayerSprintSpeed", "sprintSpeed" }, { "UpgradePlayerTumbleWings", "tumbleWings" }, { "UpgradePlayerCrouchRest", "crouchRest" }, { "UpgradePlayerExtraJump", "extraJump" }, { "UpgradePlayerTumbleClimb", "tumbleClimb" }, { "UpgradePlayerHealth", "health" }, { "UpgradePlayerEnergy", "stamina" }, { "UpgradeMapPlayerCount", "mapPlayerCount" }, { "UpgradeDeathHeadBattery", "deathHeadBattery" } };
-        private static readonly HashSet<string> PlayerVisionLegacyFallbackMonsters = new HashSet<string>(StringComparer.Ordinal) { "Tick", "Upscream" };
+        private static readonly HashSet<string> PlayerVisionLegacyFallbackMonsters = new HashSet<string>(StringComparer.Ordinal) { "Tick", "Upscream", "Headman" };
         private static readonly string[] CurrentHealthMemberNames = { "currentHealth", "healthCurrent", "_currentSyncedHealth", "_syncedHealth", "currentHP", "healthValue", "HealthValue" };
         private static readonly string[] MaxHealthMemberNames = { "maxHealth", "MaxHealth", "healthMax", "HealthMax", "healthMaximum", "maximumHealth", "maxHP", "HPMax", "health", "Health" };
 
@@ -81,6 +81,9 @@ namespace OverlayHUD
         private Coroutine pendingGameplayActivation;
         private uint cachedOverlayPid = 0;
         private float nextOverlayPidCheck = 0f;
+        // Пакетная синхронизация (Tick Rate 5Hz)
+        private bool pendingBatchedStatusSync = false;
+        private float nextBatchedStatusSyncAt = 0f;
 
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -350,9 +353,18 @@ namespace OverlayHUD
         {
             if (!gameplayActive) return; float now = Time.realtimeSinceStartup;
             if (mapValueDirty && now >= nextMapValueSyncAt) SyncMapValueIfChanged();
+
+            // НОВАЯ СИСТЕМА BATCH SYNC (TICK RATE 5 HZ)
+            if (pendingBatchedStatusSync && now >= nextBatchedStatusSyncAt)
+            {
+                nextBatchedStatusSyncAt = now + 0.2f;
+                pendingBatchedStatusSync = false;
+                SyncMonsterStatuses(new List<ResolvedEnemyCandidate>());
+            }
+
             if (now < scanPausedUntil) return;
             if (pendingUpgradeKeys.Count > 0 && now >= nextUpgradeSyncAt) { var keys = new HashSet<string>(pendingUpgradeKeys); pendingUpgradeKeys.Clear(); SyncPlayerUpgradesIfChanged(keys); }
-            if (rosterPublished && now >= nextStatusSyncAt) { nextStatusSyncAt = now + Math.Max(10f, statusInterval.Value); SyncMonsterStatuses(new List<ResolvedEnemyCandidate>()); }
+            if (rosterPublished && now >= nextStatusSyncAt) { nextStatusSyncAt = now + Math.Max(10f, statusInterval.Value); pendingBatchedStatusSync = true; }
             if (!enemyRosterDirty || now < nextScanAt) return;
             nextScanAt = now + Math.Max(0.05f, scanInterval.Value);
             try { SyncKnownEnemies(); } catch { }
@@ -399,6 +411,7 @@ namespace OverlayHUD
             lastRosterFingerprint = ""; lastStatusFingerprint = ""; pendingRosterFingerprint = ""; rosterStableScans = 0; broadEnemyDiscoveryAttempts = 0; rosterPublished = false; enemyRosterDirty = true;
             scanPausedUntil = Time.realtimeSinceStartup + 2f; nextScanAt = scanPausedUntil; nextStatusSyncAt = scanPausedUntil; nextUpgradeSyncAt = scanPausedUntil; nextBroadEnemyDiscoveryAt = scanPausedUntil; nextStatusDirectorRecoveryAt = scanPausedUntil;
             clientSimulatedTimers.Clear(); clientSimulatedHealth.Clear(); instanceIdByViewId.Clear(); viewIdByInstanceId.Clear(); lastTimerSyncSentAt.Clear();
+            pendingBatchedStatusSync = false; nextBatchedStatusSyncAt = 0f;
         }
 
         private void SyncKnownEnemies()
@@ -485,27 +498,14 @@ namespace OverlayHUD
         private IEnumerator SyncEnemyParentStatusChangedNextFrame(Component enemyParent) { for (int i = 0; i < 6; i++) { yield return new WaitForSecondsRealtime(0.2f); SyncEnemyParentStatusChanged(enemyParent); } }
         private void SyncEnemyParentTimerChanged(Component enemyParent)
         {
-            if (!gameplayActive || enemyParent == null) return; GameObject root = GetEnemyRoot(enemyParent); if (root == null || !IsEnemySent(root.GetInstanceID())) return;
-            var c = new EnemyCandidate { Component = enemyParent, Root = root, Center = Vector3.zero }; if (!TryGetEnemyRespawnStatus(c, out bool a, out float r)) return;
-            int iId = root.GetInstanceID(); float rr = a ? 0f : (float)Math.Ceiling(Math.Max(0f, r) * 10f) / 10f; string rt = rr.ToString("0.0", CultureInfo.InvariantCulture), fp = iId + ":" + (a ? "1" : "0") + ":" + rt;
-            bool ac = !lastAliveBySourceId.TryGetValue(iId, out bool pa) || pa != a; if (!ac && lastTimerStatusBySourceId.TryGetValue(iId, out string pf) && pf == fp) return;
-            float now = Time.realtimeSinceStartup; if (!ac && lastTimerStatusSentAtBySourceId.TryGetValue(iId, out float lsa) && now - lsa < 0.5f) return;
-            lastAliveBySourceId[iId] = a; lastTimerStatusBySourceId[iId] = fp; lastTimerStatusSentAtBySourceId[iId] = now;
-            if (gameObject.activeInHierarchy) StartCoroutine(PostMonsterStatuses("{\"statuses\":[{\"id\":" + iId + ",\"alive\":" + (a ? "true" : "false") + ",\"respawnRemaining\":" + rt + "}]}"));
+            if (!gameplayActive || enemyParent == null) return;
+            pendingBatchedStatusSync = true;
         }
+        
         private void SyncEnemyParentStatusChanged(Component enemyParent)
         {
-            if (!gameplayActive || enemyParent == null) return; GameObject root = GetEnemyRoot(enemyParent); if (root == null) return;
-            int iId = root.GetInstanceID(); var c = new EnemyCandidate { Component = enemyParent, Root = root, Center = Vector3.zero }; if (!TryGetEnemyRespawnStatus(c, out bool a, out float r)) return;
-            bool ih = IsEnemySent(iId); float h = 0f, mh = 0f; bool hh = ih && TryGetEnemyHealth(c, out h, out mh);
-            bool pc = IsEnemyParentPlayerClose(enemyParent), pvc = IsEnemyParentPlayerVeryClose(enemyParent); float rr = a ? 0f : (float)Math.Ceiling(Math.Max(0f, r) * 10f) / 10f;
-            string rt = rr.ToString("0.0", CultureInfo.InvariantCulture), ht = hh ? Math.Max(0f, h).ToString("0.#", CultureInfo.InvariantCulture) : "", mht = hh && mh > 0f ? mh.ToString("0.#", CultureInfo.InvariantCulture) : "";
-            string fp = iId + ":" + (a ? "1" : "0") + ":" + rt + ":" + ht + "/" + mht + ":" + (pc ? "1" : "0") + ":" + (pvc ? "1" : "0");
-            if (lastImmediateStatusBySourceId.TryGetValue(iId, out string pf) && pf == fp) return; lastImmediateStatusBySourceId[iId] = fp;
-            var json = new StringBuilder("{\"statuses\":[{\"id\":").Append(iId).Append(",\"alive\":").Append(a ? "true" : "false").Append(",\"respawnRemaining\":").Append(rt).Append(",\"playerClose\":").Append(pc ? "true" : "false").Append(",\"playerVeryClose\":").Append(pvc ? "true" : "false");
-            if (hh) { json.Append(",\"health\":").Append(ht.Length > 0 ? ht : "0"); if (mht.Length > 0) json.Append(",\"maxHealth\":").Append(mht); }
-            json.Append("}]}");
-            if (gameObject.activeInHierarchy) StartCoroutine(PostMonsterStatuses(json.ToString()));
+            if (!gameplayActive || enemyParent == null) return;
+            pendingBatchedStatusSync = true;
         }
 
         // --- ENEMY, VALUE & NETWORK HELPERS ---
@@ -597,33 +597,53 @@ namespace OverlayHUD
                     if (!dead) aliveSteamIds.Add(id);
                 }
             }
-            var upgradesByPlayer = new Dictionary<string, Dictionary<string, int>>();
+
+            var currentUpgradesByPlayer = new Dictionary<string, Dictionary<string, int>>();
+            bool anyChanged = false;
+
+            // Собираем полную и актуальную картину ВСЕХ игроков
             for (int index = 0; index < TrackedPlayerUpgrades.Length; index++)
             {
-                KeyValuePair<string, string> binding = TrackedPlayerUpgrades[index]; if (onlyKeys != null && !onlyKeys.Contains(binding.Key)) continue;
+                KeyValuePair<string, string> binding = TrackedPlayerUpgrades[index];
                 if (!(ReadMember(statsManager, binding.Value) is IDictionary upgrades)) continue;
+
                 foreach (DictionaryEntry entry in upgrades)
                 {
                     string steamId = entry.Key?.ToString(); if (string.IsNullOrEmpty(steamId) || (aliveSteamIds.Count > 0 && !aliveSteamIds.Contains(steamId))) continue;
                     int value = 0; try { value = Math.Max(0, Convert.ToInt32(entry.Value)); } catch { continue; }
-                    string cacheKey = steamId + "_" + binding.Key; if (lastSyncedUpgrades.TryGetValue(cacheKey, out int previousValue) && previousValue == value) continue;
-                    lastSyncedUpgrades[cacheKey] = value;
-                    if (!upgradesByPlayer.TryGetValue(steamId, out var playerUpgrades)) { playerUpgrades = new Dictionary<string, int>(); upgradesByPlayer[steamId] = playerUpgrades; }
+
+                    if (!currentUpgradesByPlayer.TryGetValue(steamId, out var playerUpgrades)) { playerUpgrades = new Dictionary<string, int>(); currentUpgradesByPlayer[steamId] = playerUpgrades; }
                     playerUpgrades[binding.Key] = value;
+
+                    string cacheKey = steamId + "_" + binding.Key;
+                    if (!lastSyncedUpgrades.TryGetValue(cacheKey, out int previousValue) || previousValue != value)
+                    {
+                        anyChanged = true;
+                        lastSyncedUpgrades[cacheKey] = value;
+                    }
                 }
             }
-            if (upgradesByPlayer.Count == 0) return;
-            string localId = ResolveLocalPlayerSteamId(); var json = new StringBuilder("{\"localSteamId\":\"").Append(localId).Append("\",\"players\":["); int playerCount = 0;
-            foreach (var kvp in upgradesByPlayer)
+
+            // Если ничего не изменилось и это не старт новой игры (когда onlyKeys != null) — не спамим
+            if (!anyChanged && onlyKeys == null) return;
+
+            string localId = ResolveLocalPlayerSteamId();
+            var json = new StringBuilder("{\"localSteamId\":\"").Append(localId ?? "").Append("\",\"players\":[");
+            int playerCount = 0;
+
+            // Отправляем полный список на сервер
+            foreach (var kvp in currentUpgradesByPlayer)
             {
-                string steamId = kvp.Key; var playerUpgrades = kvp.Value; if (playerUpgrades.Count == 0) continue;
+                string steamId = kvp.Key; var playerUpgrades = kvp.Value;
                 string playerName = ResolvePlayerName(steamId) ?? ("Player " + steamId.Substring(0, Math.Min(4, steamId.Length)));
                 if (playerCount++ > 0) json.Append(',');
                 json.Append("{\"steamId\":\"").Append(steamId).Append("\",\"name\":\"").Append(EscapeJson(playerName)).Append("\",\"upgrades\":{");
                 int count = 0; foreach (var upg in playerUpgrades) { if (count++ > 0) json.Append(','); json.Append('\"').Append(upg.Key).Append("\":").Append(upg.Value); }
                 json.Append("}}");
             }
-            json.Append("]}"); if (gameObject.activeInHierarchy) StartCoroutine(PostPlayerUpgrades(json.ToString(), playerCount));
+            json.Append("]}");
+
+            if (gameObject.activeInHierarchy) StartCoroutine(PostPlayerUpgrades(json.ToString(), playerCount));
         }
 
         private static string ResolvePlayerName(string steamId) { Type playerAvatarType = AccessTools.TypeByName("PlayerAvatar"); if (playerAvatarType == null) return null; foreach (var avatar in Resources.FindObjectsOfTypeAll(playerAvatarType)) { if ((ReadMember(avatar, "steamID") as string) == steamId) return ReadMember(avatar, "playerName") as string; } return null; }
@@ -761,6 +781,7 @@ namespace OverlayHUD
             }
             catch (Exception error) { return "ERROR:" + error.GetType().Name + ": " + error.Message; }
         }
+
 
         private static string SendHttpGet(string endpointUrl)
         {

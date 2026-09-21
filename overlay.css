@@ -320,13 +320,10 @@ body {
     max-height: 58px;
     margin-bottom: 6px;
     overflow: visible;
+    zoom: var(--header-scale, 1); /* <-- ДОБАВИТЬ ЭТУ СТРОКУ */
     opacity: 1;
     transform: translateY(0);
-    transition: max-height var(--overlay-layout-duration) var(--overlay-reveal-ease),
-        margin-bottom var(--overlay-layout-duration) var(--overlay-reveal-ease),
-        opacity var(--overlay-reveal-duration) ease,
-        transform var(--overlay-reveal-duration) var(--overlay-reveal-ease),
-        visibility 0s linear 0s;
+    transition: max-height var(--overlay-layout-duration) var(--overlay-reveal-ease), margin-bottom var(--overlay-layout-duration) var(--overlay-reveal-ease), opacity var(--overlay-reveal-duration) ease, transform var(--overlay-reveal-duration) var(--overlay-reveal-ease), visibility 0s linear 0s;
     visibility: visible;
 }
 
@@ -496,15 +493,15 @@ body {
 }
 
 .upgrade-row {
-    --upgrade-row-gap: max(6px, calc(var(--upgrade-size) * 0.19));
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: start;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: center;
     width: 100%;
-    max-width: 100%;
-    max-height: calc((var(--upgrade-size) + var(--upgrade-row-gap)) * 4);
-    gap: var(--upgrade-row-gap);
+    max-width: 100vw;
+    max-height: none;
+    gap: 8px; /* Уменьшили расстояние между карточками игроков */
     margin-bottom: 10px;
     overflow: visible;
     opacity: 1;
@@ -513,8 +510,6 @@ body {
     transform-origin: left top;
     transition: opacity var(--overlay-reveal-duration) ease,
         transform var(--overlay-reveal-duration) var(--overlay-reveal-ease),
-        max-height 0s linear 0s,
-        margin-bottom 0s linear 0s,
         visibility 0s linear 0s;
 }
 
@@ -1866,46 +1861,27 @@ body {
 .player-upgrade-container {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    flex: 0 0 auto;
+    min-width: max-content;
+    gap: 4px; /* Уменьшили расстояние между именем и иконками */
     background: rgba(12, 17, 23, 0.7);
-    padding: 8px 12px;
-    border-radius: 8px;
-    border-left: 4px solid var(--player-color, #ffb200);
-    margin-bottom: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    padding: 4px 8px; /* Сильно уменьшили внутренние отступы */
+    border-radius: 6px;
+    border-left: 3px solid var(--player-color, #ffb200);
+    margin-bottom: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .player-name-label {
     font-family: "Roboto", Arial, sans-serif;
-    font-size: 16px;
+    font-size: 14px; /* Уменьшили шрифт имени */
     font-weight: 800;
     color: var(--player-color, #ffb200);
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
     line-height: 1;
-    margin-bottom: 2px;
+    margin-bottom: 0;
 }
 
-.player-upgrade-container {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    background: rgba(12, 17, 23, 0.7);
-    padding: 8px 12px;
-    border-radius: 8px;
-    border-left: 4px solid var(--player-color, #ffb200);
-    margin-bottom: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-.player-name-label {
-    font-family: "Roboto", Arial, sans-serif;
-    font-size: 16px;
-    font-weight: 800;
-    color: var(--player-color, #ffb200);
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-    line-height: 1;
-    margin-bottom: 2px;
-}
 
 .overlay-container.upgrades-align-left .upgrade-row {
     align-items: flex-start !important;

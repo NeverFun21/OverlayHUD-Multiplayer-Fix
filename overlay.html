@@ -69,6 +69,12 @@
 
                 <section class="overlay-control-section" data-tab-panel="display" role="tabpanel" aria-labelledby="overlayVisibilityGroupTitle">
                     <div class="overlay-toggle-group-title" id="overlayVisibilityGroupTitle" data-i18n="groupElements">Отображение</div>
+                    <!-- НОВЫЙ ПОЛЗУНОК МАCШТАБА -->
+                    <div class="overlay-slider-row" style="margin-bottom: 8px;">
+                        <label for="overlayHeaderScaleSlider">Масштаб шапки</label>
+                        <input type="range" id="overlayHeaderScaleSlider" min="50" max="150" value="100" step="5">
+                        <span id="overlayHeaderScaleValue">100%</span>
+                    </div>
                     <div class="overlay-toggle-group-items">
                         <label class="overlay-toggle-row">
                             <span data-i18n="upgrades">Апгрейды</span>
@@ -280,6 +286,8 @@
         const overlayUpgradeSizeValue = document.getElementById("overlayUpgradeSizeValue");
         const overlayColumnsSlider = document.getElementById("overlayColumnsSlider");
         const overlayColumnsValue = document.getElementById("overlayColumnsValue");
+        const overlayHeaderScaleSlider = document.getElementById("overlayHeaderScaleSlider");
+        const overlayHeaderScaleValue = document.getElementById("overlayHeaderScaleValue");
         const overlayHoverOpacitySlider = document.getElementById("overlayHoverOpacitySlider");
         const overlayHoverOpacityValue = document.getElementById("overlayHoverOpacityValue");
         const overlaySafeZone = document.getElementById("overlaySafeZone");
@@ -1034,6 +1042,7 @@
             const health = Number(status?.health);
             const maxHealth = Number(status?.maxHealth);
             const hasHealth = Number.isFinite(health) && Number.isFinite(maxHealth) && maxHealth > 0;
+            if (status && status.alive === false) health = 0; // <-- ДОБАВИТЬ ЭТУ СТРОКУ
             bar.classList.toggle("is-hidden", !hasHealth);
             if (!hasHealth) return;
 
@@ -1423,6 +1432,11 @@
             const monsterGridWidth = state.columnsCount * state.squareSize + Math.max(0, state.columnsCount - 1) * 10;
             document.documentElement.style.setProperty("--monster-grid-width", `${monsterGridWidth}px`);
             applyViewportScale();
+            document.documentElement.style.setProperty("--header-scale", (state.headerScale / 100).toFixed(2));
+            if (overlayHeaderScaleSlider) {
+                overlayHeaderScaleSlider.value = state.headerScale || 100;
+                overlayHeaderScaleValue.textContent = (state.headerScale || 100) + "%";
+            }
             overlaySizeSlider.value = state.squareSize;
             overlaySizeValue.textContent = state.squareSize;
             overlayUpgradeSizeSlider.value = state.upgradeSize;
@@ -1646,6 +1660,11 @@
         overlaySizeSlider.addEventListener("input", () => OverlayApp.setSquareSize(parseInt(overlaySizeSlider.value, 10)));
         overlayUpgradeSizeSlider.addEventListener("input", () => OverlayApp.setUpgradeSize(parseInt(overlayUpgradeSizeSlider.value, 10)));
         overlayColumnsSlider.addEventListener("input", () => OverlayApp.setColumnsCount(parseInt(overlayColumnsSlider.value, 10)));
+        if (overlayHeaderScaleSlider) {
+            overlayHeaderScaleSlider.addEventListener("input", () => OverlayApp.setHeaderScale(parseInt(overlayHeaderScaleSlider.value, 10)));
+            overlayHeaderScaleSlider.addEventListener("pointerup", () => overlayHeaderScaleSlider.blur());
+            overlayHeaderScaleSlider.addEventListener("change", () => overlayHeaderScaleSlider.blur());
+        }
         overlayHoverOpacitySlider.addEventListener("input", () => OverlayApp.setHoverOpacity(parseInt(overlayHoverOpacitySlider.value, 10)));
         overlayAlignmentButtons.forEach((button) => {
             button.addEventListener("click", () => OverlayApp.setOverlayAlignment(button.dataset.alignment));

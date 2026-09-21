@@ -1,5 +1,5 @@
 const OverlayApp = (() => {
-    const storageKey = "overlay-control-state-v4"; // ������� ������ �����, ����� �������� ��� ���������
+    const storageKey = "overlay-control-state-v6"; // Обновил версию ключа, чтобы сбросить кэш координат
     const channelName = "overlay-control-channel";
     const channel = "BroadcastChannel" in window ? new BroadcastChannel(channelName) : null;
     const serverSyncEnabled = window.location.protocol === "http:" || window.location.protocol === "https:";
@@ -32,7 +32,10 @@ const OverlayApp = (() => {
     };
 
     const upgradeKeys = ["strength", "tumbleLaunch", "range", "sprintSpeed", "tumbleWings", "crouchRest", "extraJump", "tumbleClimb", "health", "stamina", "mapPlayerCount", "deathHeadBattery"];
-    const defaultUpgradeVisibility = upgradeKeys.reduce((acc, key) => { acc[key] = true; return acc; }, {});
+    const defaultUpgradeVisibility = upgradeKeys.reduce((acc, key) => {
+        acc[key] = (key !== "health" && key !== "stamina"); // Выключаем здоровье и выносливость по умолчанию
+        return acc;
+    }, {});
 
     const defaultState = {
         level: 1,
@@ -60,7 +63,7 @@ const OverlayApp = (() => {
         upgradesVisible: true,
         upgradeLayout: "inline",
         compactModeEnabled: true,
-        upgradeRows: "double",
+        upgradeRows: "single",
         mapValueVisible: true,
         lostValueVisible: true,
         valueWrapEnabled: true,
@@ -74,8 +77,8 @@ const OverlayApp = (() => {
         respawnIndicatorVisible: true,
         onlyAliveMonstersVisible: false,
         onlyAliveIncludeUndetected: false,
-        squareSize: 70,
-        upgradeSize: 38,
+        squareSize: 54,
+        upgradeSize: 26,
         overlayScaleVersion: 3,
         columnsCount: 11,
         columnsLayoutVersion: 2,
@@ -84,6 +87,7 @@ const OverlayApp = (() => {
         overlayPosition: { left: 0, top: 0, anchorX: "center", anchorY: "top" },
         controlsPosition: null,
         hoverOpacity: 50,
+        headerScale: 100,
         seconds: 0,
         running: false,
         startedAt: null,
@@ -120,6 +124,7 @@ const OverlayApp = (() => {
         const sourceColumnsCount = Number(source.columnsCount);
         const columnsCount = Number.isFinite(sourceColumnsCount) ? (shouldMigrateOverlayDefaults && sourceColumnsCount === 7 ? defaultState.columnsCount : sourceColumnsCount) : defaultState.columnsCount;
         const hoverOpacity = Number.isFinite(Number(source.hoverOpacity)) ? Math.min(100, Math.max(20, Number(source.hoverOpacity))) : defaultState.hoverOpacity;
+        const headerScale = Number.isFinite(Number(source.headerScale)) ? Math.min(150, Math.max(50, Number(source.headerScale))) : defaultState.headerScale;
         const interfaceLanguage = source.interfaceLanguage === "en" ? "en" : defaultState.interfaceLanguage;
         const normalizedOverlayAlignment = ["left", "center", "right"].includes(source.overlayAlignment) ? source.overlayAlignment : defaultState.overlayAlignment;
         const overlayAlignment = shouldMigrateOverlayDefaults && normalizedOverlayAlignment === "left" ? defaultState.overlayAlignment : normalizedOverlayAlignment;
@@ -152,7 +157,7 @@ const OverlayApp = (() => {
             overlayScaleVersion: defaultState.overlayScaleVersion,
             columnsLayoutVersion: defaultState.columnsLayoutVersion,
             style: 1, squareSize, upgradeSize, columnsCount, overlayDefaultsVersion: defaultState.overlayDefaultsVersion,
-            hoverOpacity, interfaceLanguage, overlayAlignment, compactModeEnabled, upgradeLayout: compactModeEnabled ? "inline" : "stacked",
+            hoverOpacity, headerScale, interfaceLanguage, overlayAlignment, compactModeEnabled, upgradeLayout: compactModeEnabled ? "inline" : "stacked",
             upgradeRows, overlayPosition, controlsPosition, timerVisible, upgradeTooltipsVisible, valueWrapEnabled, upgradeVisibility,
             players, monsters: Array.isArray(source.monsters) ? source.monsters : [], roster: Array.isArray(source.roster) ? source.roster : [],
             mapValue, mapValueInitial, mapValueGoal, lostValue,
@@ -318,6 +323,7 @@ const OverlayApp = (() => {
     function setOnlyMyUpgrades(onlyMyUpgrades) { updateState((currentState) => ({ ...currentState, onlyMyUpgrades: Boolean(onlyMyUpgrades) })); }
     function setUpgradesAlignment(upgradesAlignment) { updateState((currentState) => ({ ...currentState, upgradesAlignment: ["left", "center", "right"].includes(upgradesAlignment) ? upgradesAlignment : defaultState.upgradesAlignment })); }
     function setShowInShop(showInShop) { updateState((currentState) => ({ ...currentState, showInShop: Boolean(showInShop) })); }
+    function setHeaderScale(headerScale) { updateState((currentState) => ({ ...currentState, headerScale })); } // <-- ВОТ ЭТА СТРОКА БЫЛА ПРОПУЩЕНА
 
     return {
         monsterConfig, upgradeKeys, addMonster, formatTime, getCountsForLevel, getMonsterCount, getMonsterImage, getState,
@@ -327,6 +333,6 @@ const OverlayApp = (() => {
         setMonsterStrengthVisible, setOverlayAlignment, setOverlayPosition, setSquareSize, setStrength, setTumbleLaunch,
         setStyle, setTimerVisible, setUpgradeLayout, setUpgradeRows, setUpgradeTooltipsVisible, setUpgradeSize,
         setUpgradesVisible, setUpgradeVisibility, setRespawnTimerVisible, setRespawnIndicatorVisible,
-        setOnlyAliveMonstersVisible, setOnlyAliveIncludeUndetected, setOnlyMyUpgrades, setUpgradesAlignment, setShowInShop, startTimer, stopTimer, subscribe
+        setOnlyAliveMonstersVisible, setOnlyAliveIncludeUndetected, setOnlyMyUpgrades, setUpgradesAlignment, setShowInShop, startTimer, stopTimer, subscribe, setHeaderScale
     };
 })();
