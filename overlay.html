@@ -1039,10 +1039,11 @@
                 square.appendChild(bar);
             }
 
-            const health = Number(status?.health);
+            let health = Number(status?.health);
             const maxHealth = Number(status?.maxHealth);
+            if (status && status.alive === false) health = 0;
             const hasHealth = Number.isFinite(health) && Number.isFinite(maxHealth) && maxHealth > 0;
-            if (status && status.alive === false) health = 0; // <-- ДОБАВИТЬ ЭТУ СТРОКУ
+
             bar.classList.toggle("is-hidden", !hasHealth);
             if (!hasHealth) return;
 

@@ -1,5 +1,5 @@
 const OverlayApp = (() => {
-    const storageKey = "overlay-control-state-v6"; // Обновил версию ключа, чтобы сбросить кэш координат
+    const storageKey = "overlay-control-state-v7"; // Обновил версию ключа, чтобы сбросить кэш координат
     const channelName = "overlay-control-channel";
     const channel = "BroadcastChannel" in window ? new BroadcastChannel(channelName) : null;
     const serverSyncEnabled = window.location.protocol === "http:" || window.location.protocol === "https:";

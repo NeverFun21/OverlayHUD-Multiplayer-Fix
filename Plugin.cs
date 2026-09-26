@@ -43,7 +43,7 @@ namespace OverlayHUD
         private static readonly Dictionary<string, string> KnownMonsters = new Dictionary<string, string> { { "apexpredator", "Apex Predator" }, { "animal", "Animal" }, { "banger", "Banger" }, { "bang", "Banger" }, { "bella", "Bella" }, { "beamer", "Clown" }, { "birthdayboy", "Birthday Boy" }, { "bowtie", "Bowtie" }, { "chef", "Chef" }, { "cheffrog", "Chef" }, { "ceilingeye", "Peeper" }, { "cleanupcrew", "Cleanup Crew" }, { "clown", "Clown" }, { "clownbeamer", "Clown" }, { "duck", "Rugrat" }, { "elsa", "Elsa" }, { "floater", "Mentalist" }, { "gambit", "Gambit" }, { "gnome", "Gnomes" }, { "headgrab", "Headgrab" }, { "headgrabber", "Headgrab" }, { "headman", "Headman" }, { "hearthugger", "Heart Hugger" }, { "hidden", "Hidden" }, { "huntsman", "Huntsman" }, { "hunter", "Huntsman" }, { "loom", "Loom" }, { "mentalist", "Mentalist" }, { "oogly", "Oogly" }, { "peeper", "Peeper" }, { "reaper", "Reaper" }, { "robe", "Robe" }, { "rugrat", "Rugrat" }, { "runner", "Gambit" }, { "shadowchild", "Shadow Child" }, { "shadow", "Shadow Child" }, { "spewer", "Spewer" }, { "slowmouth", "Spewer" }, { "slowwalker", "Trudge" }, { "spinny", "Bowtie" }, { "thinman", "Reaper" }, { "tick", "Tick" }, { "trudge", "Trudge" }, { "tricycle", "Birthday Boy" }, { "tumbler", "Apex Predator" }, { "upscream", "Upscream" }, { "valuablethrower", "Rugrat" } };
         private static readonly KeyValuePair<string, string>[] TrackedPlayerUpgrades = { new KeyValuePair<string, string>("strength", "playerUpgradeStrength"), new KeyValuePair<string, string>("tumbleLaunch", "playerUpgradeLaunch"), new KeyValuePair<string, string>("range", "playerUpgradeRange"), new KeyValuePair<string, string>("sprintSpeed", "playerUpgradeSpeed"), new KeyValuePair<string, string>("tumbleWings", "playerUpgradeTumbleWings"), new KeyValuePair<string, string>("crouchRest", "playerUpgradeCrouchRest"), new KeyValuePair<string, string>("extraJump", "playerUpgradeExtraJump"), new KeyValuePair<string, string>("tumbleClimb", "playerUpgradeTumbleClimb"), new KeyValuePair<string, string>("health", "playerUpgradeHealth"), new KeyValuePair<string, string>("stamina", "playerUpgradeStamina"), new KeyValuePair<string, string>("mapPlayerCount", "playerUpgradeMapPlayerCount"), new KeyValuePair<string, string>("deathHeadBattery", "playerUpgradeDeathHeadBattery") };
         private static readonly Dictionary<string, string> UpgradeStateKeyByPunMethod = new Dictionary<string, string> { { "UpgradePlayerGrabStrength", "strength" }, { "UpgradePlayerTumbleLaunch", "tumbleLaunch" }, { "UpgradePlayerGrabRange", "range" }, { "UpgradePlayerSprintSpeed", "sprintSpeed" }, { "UpgradePlayerTumbleWings", "tumbleWings" }, { "UpgradePlayerCrouchRest", "crouchRest" }, { "UpgradePlayerExtraJump", "extraJump" }, { "UpgradePlayerTumbleClimb", "tumbleClimb" }, { "UpgradePlayerHealth", "health" }, { "UpgradePlayerEnergy", "stamina" }, { "UpgradeMapPlayerCount", "mapPlayerCount" }, { "UpgradeDeathHeadBattery", "deathHeadBattery" } };
-        private static readonly HashSet<string> PlayerVisionLegacyFallbackMonsters = new HashSet<string>(StringComparer.Ordinal) { "Tick", "Upscream", "Headman" };
+        private static readonly HashSet<string> PlayerVisionLegacyFallbackMonsters = new HashSet<string>(StringComparer.Ordinal) { "Tick", "Upscream", "Headman", "Gnomes", "Gnome", "Rugrat", "Animal", "Oogly" };
         private static readonly string[] CurrentHealthMemberNames = { "currentHealth", "healthCurrent", "_currentSyncedHealth", "_syncedHealth", "currentHP", "healthValue", "HealthValue" };
         private static readonly string[] MaxHealthMemberNames = { "maxHealth", "MaxHealth", "healthMax", "HealthMax", "healthMaximum", "maximumHealth", "maxHP", "HPMax", "health", "Health" };
 
@@ -63,12 +63,13 @@ namespace OverlayHUD
         private readonly Dictionary<int, float> clientSimulatedTimers = new Dictionary<int, float>();
         private readonly Dictionary<int, float> clientSimulatedHealth = new Dictionary<int, float>();
 
-        // СЕТЕВЫЕ СЛОВАРИ DЛЯ МАГИИ СИНХРОНИЗАЦИИ
         private readonly Dictionary<int, int> instanceIdByViewId = new Dictionary<int, int>();
         private readonly Dictionary<int, int> viewIdByInstanceId = new Dictionary<int, int>();
         private readonly Dictionary<int, float> lastTimerSyncSentAt = new Dictionary<int, float>();
+        private readonly HashSet<int> viewIdFailedInstanceIds = new HashSet<int>();
+        private readonly List<int> _timerKeysBuffer = new List<int>();
 
-        private float nextScanAt, nextStatusSyncAt, nextUpgradeSyncAt, nextMapValueSyncAt, nextBroadEnemyDiscoveryAt, nextStatusDirectorRecoveryAt, scanPausedUntil;
+        private float nextScanAt, nextStatusSyncAt, nextUpgradeSyncAt, nextMapValueSyncAt, nextBroadEnemyDiscoveryAt, nextStatusDirectorRecoveryAt, scanPausedUntil, nextStatusHeartbeatAt;
         private int fallbackLevel = 1, lastSyncedLevel;
         private readonly Dictionary<string, int> lastSyncedUpgrades = new Dictionary<string, int>();
         private readonly HashSet<string> pendingUpgradeKeys = new HashSet<string>();
@@ -81,9 +82,15 @@ namespace OverlayHUD
         private Coroutine pendingGameplayActivation;
         private uint cachedOverlayPid = 0;
         private float nextOverlayPidCheck = 0f;
-        // Пакетная синхронизация (Tick Rate 5Hz)
         private bool pendingBatchedStatusSync = false;
         private float nextBatchedStatusSyncAt = 0f;
+
+        // Прямое кэширование для перехвата Photon
+        private static PropertyInfo eventCodeProp;
+        private static FieldInfo eventCodeField;
+        private static PropertyInfo eventDataProp;
+        private static FieldInfo eventDataField;
+        private static bool eventReflectInit = false;
 
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -93,6 +100,15 @@ namespace OverlayHUD
         private ConfigEntry<bool> requireLineOfSight, preferPlayerVisionDetection, debugLogging, autoStartOverlayApp, autoCloseOverlayApp;
         private Harmony harmony;
         private Process launchedOverlayProcess;
+
+        private static readonly Dictionary<string, Type> typeCache = new Dictionary<string, Type>();
+        private static Type GetTypeCached(string name)
+        {
+            if (typeCache.TryGetValue(name, out Type t)) return t;
+            t = AccessTools.TypeByName(name);
+            typeCache[name] = t;
+            return t;
+        }
 
         private void Awake()
         {
@@ -195,8 +211,7 @@ namespace OverlayHUD
                 if (m20 != null) harmony.Patch(m20, postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(EnemyHealthHurtRpcPostfix))));
                 foreach (string mName in UpgradeStateKeyByPunMethod.Keys) { MethodInfo m = AccessTools.Method("PunManager:" + mName); if (m != null) harmony.Patch(m, postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(PlayerUpgradeAppliedPostfix)))); }
 
-                // PUN Event Hook
-                Type lbcType = AccessTools.TypeByName("Photon.Realtime.LoadBalancingClient");
+                Type lbcType = GetTypeCached("Photon.Realtime.LoadBalancingClient");
                 if (lbcType != null)
                 {
                     MethodInfo onEventMethod = AccessTools.Method(lbcType, "OnEvent");
@@ -212,11 +227,57 @@ namespace OverlayHUD
         private static void LevelChangedPostfix(object __instance) { instance?.ScheduleGameplayActivation("RunManager.ChangeLevel"); }
         private static void PlayerUpgradeAppliedPostfix(MethodBase __originalMethod, string _steamID, int __result) { if (__originalMethod != null && UpgradeStateKeyByPunMethod.TryGetValue(__originalMethod.Name, out string k)) instance?.SyncPlayerUpgradeValue(k, _steamID, __result); }
         private void SyncPlayerUpgradeValue(string stateKey, string steamId, int value) { if (gameplayActive && !string.IsNullOrEmpty(stateKey) && !string.IsNullOrEmpty(steamId)) SyncPlayerUpgradesIfChanged(null); }
-        private static void EnemyParentSpawnedPostfix(object __instance) { if (__instance is Component comp) { RegisterEnemyParent(comp); if (instance != null) { GameObject root = GetEnemyRoot(comp); if (root != null) instance.clientSimulatedHealth.Remove(root.GetInstanceID()); } instance?.SyncEnemyParentStatusChanged(comp); } }
+        private static void EnemyParentSpawnedPostfix(object __instance) { if (__instance is Component comp) { RegisterEnemyParent(comp); if (instance != null) { GameObject root = GetEnemyRoot(comp); if (root != null) { var cand = new EnemyCandidate { Component = comp, Root = root, Center = Vector3.zero }; instance.clientSimulatedHealth.Remove(instance.GetStableEnemyId(cand)); } } instance?.SyncEnemyParentStatusChanged(comp); } }
         private static void EnemyParentDespawnedPostfix(object __instance) { if (__instance is Component comp) instance?.ScheduleEnemyParentStatusChanged(comp); }
         private static void EnemyParentTimerChangedPostfix(object __instance) { if (__instance is Component comp) instance?.SyncEnemyParentTimerChanged(comp); }
         private static void EnemyParentPlayerCloseLogicPostfix(object __instance, ref IEnumerator __result) { if (__result != null && __instance is Component ep) __result = WatchBlindEnemyPlayerClose(__result, ep); }
         private static void EnemyOnScreenLogicPostfix(object __instance, ref IEnumerator __result) { if (__result != null && __instance is Component eos) __result = WatchEnemyOnScreen(__result, eos); }
+
+        // Оптимизировано: проверка идет не каждый кадр, а только каждый 5-й, чтобы снять нагрузку с ЦП
+        private static IEnumerator WatchBlindEnemyPlayerClose(IEnumerator inner, Component enemyParent)
+        {
+            bool wasPlayerClose = IsEnemyParentPlayerClose(enemyParent);
+            bool wasPlayerVeryClose = instance != null && IsEnemyParentPlayerVeryClose(enemyParent);
+            int frameThrottle = 0;
+            while (inner.MoveNext())
+            {
+                yield return inner.Current;
+                if (++frameThrottle < 5) continue;
+                frameThrottle = 0;
+
+                Plugin plugin = instance;
+                if (plugin == null || !plugin.gameplayActive || enemyParent == null) continue;
+                bool isPlayerClose = IsEnemyParentPlayerClose(enemyParent);
+                bool isPlayerVeryClose = IsEnemyParentPlayerVeryClose(enemyParent);
+                if (isPlayerClose != wasPlayerClose || isPlayerVeryClose != wasPlayerVeryClose) plugin.SyncEnemyParentStatusChanged(enemyParent);
+                if (isPlayerVeryClose && !wasPlayerVeryClose && (!plugin.preferPlayerVisionDetection.Value || !HasEnemyOnScreen(enemyParent) || ShouldUseLegacyVisionFallback(enemyParent))) plugin.HandleBlindEnemyPlayerVeryClose(enemyParent);
+                wasPlayerClose = isPlayerClose; wasPlayerVeryClose = isPlayerVeryClose;
+            }
+        }
+
+        // Оптимизировано: проверка идет каждый 5-й кадр
+        private static IEnumerator WatchEnemyOnScreen(IEnumerator inner, Component enemyOnScreen)
+        {
+            Component enemyParent = null; int stableId = 0; bool encounterHandled = false;
+            int frameThrottle = 0;
+            while (inner.MoveNext())
+            {
+                yield return inner.Current;
+                if (++frameThrottle < 5) continue;
+                frameThrottle = 0;
+
+                Plugin plugin = instance;
+                if (plugin == null || !plugin.gameplayActive || enemyOnScreen == null || encounterHandled || !plugin.preferPlayerVisionDetection.Value) continue;
+                if (enemyParent == null) enemyParent = GetEnemyParentFromOnScreen(enemyOnScreen);
+                if (enemyParent == null) continue;
+                if (stableId == 0) stableId = plugin.GetStableEnemyId(new EnemyCandidate { Component = enemyParent, Root = GetEnemyRoot(enemyParent) });
+                if (stableId != 0 && IsEnemySent(stableId)) { encounterHandled = true; continue; }
+                if (!plugin.IsEnemyOnScreenVisible(enemyOnScreen)) continue;
+                plugin.HandleEnemyOnScreenVisible(enemyParent, ref stableId);
+                if (stableId != 0 && IsEnemySent(stableId)) encounterHandled = true;
+            }
+        }
+
         private static void ExtractionCompletedPostfix() { instance?.RefreshMapValue("extraction completed"); }
         private static void ValuableDollarValueSetRpcPostfix(object __instance, float value) { instance?.ScheduleMapValueRefresh("valuable rpc"); }
         private static void ValuableDollarValueSetLogicPostfix(object __instance) { if (CachedIsMasterClient()) instance?.ScheduleMapValueRefresh("valuable logic"); }
@@ -225,6 +286,7 @@ namespace OverlayHUD
         private static void PhysGrabObjectBreakPostfix(object __instance, float valueLost, bool _loseValue) { if (_loseValue) { instance?.AddMapValue(-valueLost, "valuable break"); instance?.AddLostValue(valueLost, "valuable break"); } }
         private static void PhysGrabObjectDestroyedPostfix(object __instance) { if (!CachedIsRunLevel(null)) return; Component val = GetValuableComponent(__instance); if (val == null) return; float cur = ReadValuableCurrentValue(val), orig = ReadValuableOriginalValue(val); if (orig > 0f && cur < orig * 0.15f) return; instance?.AddMapValue(-cur, "valuable destroyed"); if (!IsValuableInDollarHaul(val)) instance?.AddLostValue(cur, "valuable destroyed"); }
         private static void EnemyVisionTriggerPostfix(object __instance, int playerID, object player, bool culled, bool playerNear) { instance?.HandleEnemyVisionTrigger(__instance, playerID); }
+
         private static void EnemyHealthChangedPostfix(object __instance) { instance?.SyncEnemyHealthChanged(__instance); }
         private static void EnemyHealthHurtRpcPostfix(object __instance, object[] __args)
         {
@@ -236,15 +298,15 @@ namespace OverlayHUD
                 GameObject root = GetEnemyRoot(ep);
                 if (root != null)
                 {
-                    int id = root.GetInstanceID(); var cand = new EnemyCandidate { Component = ep, Root = root, Center = Vector3.zero };
-                    if (!instance.clientSimulatedHealth.ContainsKey(id) && instance.TryGetEnemyHealth(cand, out float h, out float mh)) instance.clientSimulatedHealth[id] = h;
-                    if (instance.clientSimulatedHealth.ContainsKey(id)) instance.clientSimulatedHealth[id] = Math.Max(0f, instance.clientSimulatedHealth[id] - dmg);
+                    var cand = new EnemyCandidate { Component = ep, Root = root, Center = Vector3.zero };
+                    int stableId = instance.GetStableEnemyId(cand);
+                    if (!instance.clientSimulatedHealth.ContainsKey(stableId) && instance.TryGetEnemyHealth(cand, out float h, out float mh)) instance.clientSimulatedHealth[stableId] = h;
+                    if (instance.clientSimulatedHealth.ContainsKey(stableId)) instance.clientSimulatedHealth[stableId] = Math.Max(0f, instance.clientSimulatedHealth[stableId] - dmg);
                 }
                 instance.SyncEnemyParentStatusChanged(ep);
             }
         }
 
-        // --- PHOTON NETWORK MAGIC ---
         private static Type photonNetworkType, raiseEventOptionsType, sendOptionsType;
         private static MethodInfo raiseEventMethod;
         private static object raiseEventOptionsOthers, sendReliableOptions;
@@ -255,9 +317,9 @@ namespace OverlayHUD
             {
                 if (photonNetworkType == null)
                 {
-                    photonNetworkType = AccessTools.TypeByName("Photon.Pun.PhotonNetwork");
-                    raiseEventOptionsType = AccessTools.TypeByName("Photon.Realtime.RaiseEventOptions");
-                    sendOptionsType = AccessTools.TypeByName("ExitGames.Client.Photon.SendOptions");
+                    photonNetworkType = GetTypeCached("Photon.Pun.PhotonNetwork");
+                    raiseEventOptionsType = GetTypeCached("Photon.Realtime.RaiseEventOptions");
+                    sendOptionsType = GetTypeCached("ExitGames.Client.Photon.SendOptions");
                     if (photonNetworkType != null && raiseEventOptionsType != null && sendOptionsType != null)
                     {
                         raiseEventOptionsOthers = Activator.CreateInstance(raiseEventOptionsType);
@@ -277,42 +339,78 @@ namespace OverlayHUD
             if (raiseEventMethod != null) { try { raiseEventMethod.Invoke(null, new object[] { (byte)187, data, raiseEventOptionsOthers, sendReliableOptions }); } catch { } }
         }
 
+        // Оптимизировано: прямое чтение свойств пакета вместо тяжелой рефлексии Dictionary
         private static void OnPhotonEventPrefix(object photonEvent)
         {
             if (photonEvent == null || instance == null) return;
             try
             {
-                byte code = Convert.ToByte(ReadMember(photonEvent, "Code"));
-                if (code == 187 && ReadMember(photonEvent, "CustomData") is object[] data && data.Length >= 3)
+                if (!eventReflectInit)
                 {
-                    string action = data[0] as string; int viewId = Convert.ToInt32(data[1]);
-                    if (action == "SPOT") instance.HandleRemoteSpot(viewId, data[2] as string);
-                    else if (action == "TIMER") instance.HandleRemoteTimer(viewId, Convert.ToSingle(data[2], CultureInfo.InvariantCulture));
+                    Type t = photonEvent.GetType();
+                    eventCodeProp = t.GetProperty("Code", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (eventCodeProp == null) eventCodeField = t.GetField("Code", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    eventDataProp = t.GetProperty("CustomData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (eventDataProp == null) eventDataField = t.GetField("CustomData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    eventReflectInit = true;
+                }
+
+                byte code = 0;
+                if (eventCodeProp != null) code = (byte)eventCodeProp.GetValue(photonEvent, null);
+                else if (eventCodeField != null) code = (byte)eventCodeField.GetValue(photonEvent);
+
+                if (code == 187)
+                {
+                    object customData = null;
+                    if (eventDataProp != null) customData = eventDataProp.GetValue(photonEvent, null);
+                    else if (eventDataField != null) customData = eventDataField.GetValue(photonEvent);
+
+                    if (customData is object[] data && data.Length >= 3)
+                    {
+                        string action = data[0] as string; int viewId = Convert.ToInt32(data[1]);
+                        if (action == "SPOT") instance.HandleRemoteSpot(viewId, data[2] as string);
+                        else if (action == "TIMER") instance.HandleRemoteTimer(viewId, Convert.ToSingle(data[2], CultureInfo.InvariantCulture));
+                    }
                 }
             }
             catch { }
         }
 
+        private int GetStableEnemyId(EnemyCandidate candidate)
+        {
+            if (candidate.Root == null) return 0;
+            int iId = candidate.Root.GetInstanceID();
+            Component ep = GetEnemyParent(candidate);
+            if (ep != null)
+            {
+                int viewId = GetEnemyViewId(ep, iId);
+                if (viewId != 0) return -Math.Abs(viewId);
+            }
+            return iId;
+        }
+
         private void HandleRemoteSpot(int viewId, string monsterName)
         {
             if (!gameplayActive) return;
-            int iId = ResolveInstanceIdByViewId(viewId); if (iId == 0) iId = -Math.Abs(viewId);
-            if (IsEnemySent(iId) || pendingEncounterIds.Contains(iId)) return;
-            if (!TryMarkEnemySent(iId)) return;
+            int stableId = -Math.Abs(viewId);
+            if (IsEnemySent(stableId) || pendingEncounterIds.Contains(stableId)) return;
+            if (!TryMarkEnemySent(stableId)) return;
             MarkMonsterSeen(monsterName, default(EnemyCandidate));
-            if (gameObject.activeInHierarchy) StartCoroutine(PostSeenMonster(monsterName, iId));
+            if (gameObject.activeInHierarchy) StartCoroutine(PostSeenMonster(monsterName, stableId));
         }
 
         private void HandleRemoteTimer(int viewId, float timer)
         {
             if (!gameplayActive) return;
-            int iId = ResolveInstanceIdByViewId(viewId); if (iId == 0) iId = -Math.Abs(viewId);
-            clientSimulatedTimers[iId] = timer;
+            int stableId = -Math.Abs(viewId);
+            clientSimulatedTimers[stableId] = timer;
         }
 
         private int GetEnemyViewId(Component ep, int iId)
         {
             if (viewIdByInstanceId.TryGetValue(iId, out int viewId)) return viewId;
+            if (viewIdFailedInstanceIds.Contains(iId)) return 0;
+
             object photonView = ReadMember(ep, "photonView");
             if (photonView == null) { Component enemy = ReadMember(ep, "Enemy") as Component; if (enemy != null) photonView = ReadMember(enemy, "photonView"); }
             if (photonView != null)
@@ -320,18 +418,7 @@ namespace OverlayHUD
                 viewId = ReadIntMember(photonView, "ViewID");
                 if (viewId != 0) { viewIdByInstanceId[iId] = viewId; instanceIdByViewId[viewId] = iId; return viewId; }
             }
-            return 0;
-        }
-
-        private int ResolveInstanceIdByViewId(int targetViewId)
-        {
-            if (instanceIdByViewId.TryGetValue(targetViewId, out int iId)) return iId;
-            foreach (var parent in GetKnownEnemyParentsSnapshot())
-            {
-                if (parent == null) continue;
-                GameObject root = GetEnemyRoot(parent);
-                if (root != null && GetEnemyViewId(parent, root.GetInstanceID()) == targetViewId) return root.GetInstanceID();
-            }
+            viewIdFailedInstanceIds.Add(iId);
             return 0;
         }
 
@@ -345,7 +432,18 @@ namespace OverlayHUD
             bool isCursorVisible = Cursor.visible;
             if (isCursorVisible != pendingCursorState) { pendingCursorState = isCursorVisible; cursorStateChangeTime = Time.unscaledTime + 0.3f; }
             if (pendingCursorState != wasCursorVisible && Time.unscaledTime >= cursorStateChangeTime) { wasCursorVisible = pendingCursorState; if (gameObject.activeInHierarchy) StartCoroutine(PostCursorState(wasCursorVisible)); }
-            if (!CachedIsMasterClient()) { var keys = new List<int>(clientSimulatedTimers.Keys); foreach (int k in keys) { if (clientSimulatedTimers[k] > 0f) clientSimulatedTimers[k] = Math.Max(0f, clientSimulatedTimers[k] - Time.deltaTime); } }
+
+            // Оптимизировано: нет создания новых списков каждый кадр
+            if (!CachedIsMasterClient() && clientSimulatedTimers.Count > 0)
+            {
+                _timerKeysBuffer.Clear();
+                foreach (var kvp in clientSimulatedTimers) _timerKeysBuffer.Add(kvp.Key);
+                foreach (int k in _timerKeysBuffer)
+                {
+                    if (clientSimulatedTimers[k] > 0f)
+                        clientSimulatedTimers[k] = Math.Max(0f, clientSimulatedTimers[k] - Time.deltaTime);
+                }
+            }
             TickScan();
         }
 
@@ -354,7 +452,12 @@ namespace OverlayHUD
             if (!gameplayActive) return; float now = Time.realtimeSinceStartup;
             if (mapValueDirty && now >= nextMapValueSyncAt) SyncMapValueIfChanged();
 
-            // НОВАЯ СИСТЕМА BATCH SYNC (TICK RATE 5 HZ)
+            if (now >= nextStatusHeartbeatAt)
+            {
+                nextStatusHeartbeatAt = now + 2f;
+                pendingBatchedStatusSync = true;
+            }
+
             if (pendingBatchedStatusSync && now >= nextBatchedStatusSyncAt)
             {
                 nextBatchedStatusSyncAt = now + 0.2f;
@@ -410,51 +513,55 @@ namespace OverlayHUD
             visionEnemyCacheByVisionId.Clear(); pendingEncounterIds.Clear(); cachedLocalPlayerViewId = int.MinValue;
             lastRosterFingerprint = ""; lastStatusFingerprint = ""; pendingRosterFingerprint = ""; rosterStableScans = 0; broadEnemyDiscoveryAttempts = 0; rosterPublished = false; enemyRosterDirty = true;
             scanPausedUntil = Time.realtimeSinceStartup + 2f; nextScanAt = scanPausedUntil; nextStatusSyncAt = scanPausedUntil; nextUpgradeSyncAt = scanPausedUntil; nextBroadEnemyDiscoveryAt = scanPausedUntil; nextStatusDirectorRecoveryAt = scanPausedUntil;
-            clientSimulatedTimers.Clear(); clientSimulatedHealth.Clear(); instanceIdByViewId.Clear(); viewIdByInstanceId.Clear(); lastTimerSyncSentAt.Clear();
+            clientSimulatedTimers.Clear(); clientSimulatedHealth.Clear(); instanceIdByViewId.Clear(); viewIdByInstanceId.Clear(); lastTimerSyncSentAt.Clear(); viewIdFailedInstanceIds.Clear();
             pendingBatchedStatusSync = false; nextBatchedStatusSyncAt = 0f;
         }
 
         private void SyncKnownEnemies()
         {
             List<EnemyCandidate> found = FindEnemyCandidates(); var res = new List<ResolvedEnemyCandidate>();
-            foreach (EnemyCandidate cand in found) { int iId = cand.Root.GetInstanceID(); if (!resolvedMonsterNames.TryGetValue(iId, out string mName)) { mName = ResolveMonsterName(cand.Component); if (mName != null) resolvedMonsterNames[iId] = mName; } if (mName != null) res.Add(new ResolvedEnemyCandidate { Candidate = cand, MonsterName = mName }); }
+            foreach (EnemyCandidate cand in found) { int stableId = GetStableEnemyId(cand); if (!resolvedMonsterNames.TryGetValue(stableId, out string mName)) { mName = ResolveMonsterName(cand.Component); if (mName != null) resolvedMonsterNames[stableId] = mName; } if (mName != null) res.Add(new ResolvedEnemyCandidate { Candidate = cand, MonsterName = mName }); }
             if (!SyncMonsterRoster(res)) return;
             if (!requireLineOfSight.Value) RevealAllKnownEnemies(res);
             if (res.Count == 0) { enemyRosterDirty = false; return; }
             SyncMonsterStatuses(res); TryPublishPendingVisionEncounters(res); enemyRosterDirty = false;
         }
 
-        private void RevealAllKnownEnemies(List<ResolvedEnemyCandidate> enemies) { foreach (var res in enemies) { int iId = res.Candidate.Root.GetInstanceID(); if (!TryMarkEnemySent(iId)) continue; pendingEncounterIds.Remove(iId); MarkMonsterSeen(res.MonsterName, res.Candidate); if (gameObject.activeInHierarchy) StartCoroutine(PostSeenMonster(res.MonsterName, iId)); } }
+        private void RevealAllKnownEnemies(List<ResolvedEnemyCandidate> enemies) { foreach (var res in enemies) { int stableId = GetStableEnemyId(res.Candidate); if (!TryMarkEnemySent(stableId)) continue; pendingEncounterIds.Remove(stableId); MarkMonsterSeen(res.MonsterName, res.Candidate); if (gameObject.activeInHierarchy) StartCoroutine(PostSeenMonster(res.MonsterName, stableId)); } }
 
         private bool SyncMonsterRoster(List<ResolvedEnemyCandidate> enemies)
         {
-            enemies.Sort((l, r) => l.Candidate.Root.GetInstanceID().CompareTo(r.Candidate.Root.GetInstanceID()));
-            var fp = new StringBuilder(); foreach (var e in enemies) fp.Append(e.Candidate.Root.GetInstanceID()).Append(':').Append(e.MonsterName).Append(';'); string nextFp = fp.ToString();
+            enemies.Sort((l, r) => GetStableEnemyId(l.Candidate).CompareTo(GetStableEnemyId(r.Candidate)));
+            var fp = new StringBuilder(); foreach (var e in enemies) fp.Append(GetStableEnemyId(e.Candidate)).Append(':').Append(e.MonsterName).Append(';'); string nextFp = fp.ToString();
             if (!rosterPublished) { if (nextFp != pendingRosterFingerprint) { pendingRosterFingerprint = nextFp; rosterStableScans = 0; return false; } if (++rosterStableScans < 2) return false; rosterPublished = true; }
             if (nextFp == lastRosterFingerprint) return true; lastRosterFingerprint = nextFp;
-            var json = new StringBuilder("{\"monsters\":["); for (int i = 0; i < enemies.Count; i++) { if (i > 0) json.Append(','); json.Append("{\"id\":").Append(enemies[i].Candidate.Root.GetInstanceID()).Append(",\"name\":\"").Append(EscapeJson(enemies[i].MonsterName)).Append("\"}"); }
+            var json = new StringBuilder("{\"monsters\":["); for (int i = 0; i < enemies.Count; i++) { if (i > 0) json.Append(','); json.Append("{\"id\":").Append(GetStableEnemyId(enemies[i].Candidate)).Append(",\"name\":\"").Append(EscapeJson(enemies[i].MonsterName)).Append("\"}"); }
             json.Append("]}");
             if (gameObject.activeInHierarchy) StartCoroutine(PostMonsterRoster(json.ToString())); return true;
         }
 
+        // Оптимизировано: умное округление таймера в Fingerprint избавляет от спама HTTP запросами
         private void SyncMonsterStatuses(List<ResolvedEnemyCandidate> enemies)
         {
             var json = new StringBuilder("{\"statuses\":["); var fp = new StringBuilder(); int statusCount = 0; var cands = new Dictionary<int, EnemyCandidate>();
-            foreach (var e in enemies) { int sId = e.Candidate.Root.GetInstanceID(); cands[sId] = e.Candidate; Component p = GetEnemyParent(e.Candidate); if (p != null) sourceIdsByEnemyParent[p.GetInstanceID()] = sId; }
+            foreach (var e in enemies) { int sId = GetStableEnemyId(e.Candidate); cands[sId] = e.Candidate; Component p = GetEnemyParent(e.Candidate); if (p != null) sourceIdsByEnemyParent[p.GetInstanceID()] = sId; }
             foreach (Component p in GetKnownEnemyParentsSnapshot()) if (p != null) AddStatusCandidate(cands, p);
             float now = Time.realtimeSinceStartup;
             if (cands.Count == 0 || now >= nextStatusDirectorRecoveryAt) { nextStatusDirectorRecoveryAt = now + 30f; foreach (Component p in FindSpawnedEnemiesFromDirector()) if (p != null) { RegisterEnemyParent(p); AddStatusCandidate(cands, p); } }
             var keys = new List<int>(cands.Keys); keys.Sort();
-            foreach (int iId in keys)
+            foreach (int stableId in keys)
             {
-                EnemyCandidate cand = cands[iId]; if (!TryGetEnemyRespawnStatus(cand, out bool alive, out float rem)) continue;
-                float h = 0f, mh = 0f; bool ih = IsEnemySent(iId); bool hasHealth = ih && TryGetEnemyHealth(cand, out h, out mh);
-                Component sep = GetEnemyParent(cand); bool pc = IsEnemyParentPlayerClose(sep), pvc = IsEnemyParentPlayerVeryClose(sep); lastAliveBySourceId[iId] = alive;
+                EnemyCandidate cand = cands[stableId]; if (!TryGetEnemyRespawnStatus(cand, out bool alive, out float rem)) continue;
+                float h = 0f, mh = 0f; bool ih = IsEnemySent(stableId); bool hasHealth = ih && TryGetEnemyHealth(cand, out h, out mh);
+                Component sep = GetEnemyParent(cand); bool pc = IsEnemyParentPlayerClose(sep), pvc = IsEnemyParentPlayerVeryClose(sep); lastAliveBySourceId[stableId] = alive;
                 float rr = alive ? 0f : (float)Math.Ceiling(Math.Max(0f, rem) * 10f) / 10f;
                 string rt = rr.ToString("0.0", CultureInfo.InvariantCulture), ht = hasHealth ? Math.Max(0f, h).ToString("0.#", CultureInfo.InvariantCulture) : "", mht = hasHealth && mh > 0f ? mh.ToString("0.#", CultureInfo.InvariantCulture) : "";
-                fp.Append(iId).Append(':').Append(alive ? '1' : '0').Append(':').Append(rt).Append(':').Append(ht).Append('/').Append(mht).Append(':').Append(pc ? '1' : '0').Append(':').Append(pvc ? '1' : '0').Append(';');
+
+                int fpTimer = alive ? 0 : (int)Math.Round(rem);
+                fp.Append(stableId).Append(':').Append(alive ? '1' : '0').Append(':').Append(fpTimer).Append(':').Append(ht).Append('/').Append(mht).Append(':').Append(pc ? '1' : '0').Append(':').Append(pvc ? '1' : '0').Append(';');
+
                 if (statusCount++ > 0) json.Append(',');
-                json.Append("{\"id\":").Append(iId).Append(",\"alive\":").Append(alive ? "true" : "false").Append(",\"respawnRemaining\":").Append(rt).Append(",\"playerClose\":").Append(pc ? "true" : "false").Append(",\"playerVeryClose\":").Append(pvc ? "true" : "false");
+                json.Append("{\"id\":").Append(stableId).Append(",\"alive\":").Append(alive ? "true" : "false").Append(",\"respawnRemaining\":").Append(rt).Append(",\"playerClose\":").Append(pc ? "true" : "false").Append(",\"playerVeryClose\":").Append(pvc ? "true" : "false");
                 if (hasHealth) { json.Append(",\"health\":").Append(ht.Length > 0 ? ht : "0"); if (mht.Length > 0) json.Append(",\"maxHealth\":").Append(mht); }
                 json.Append('}');
             }
@@ -468,47 +575,38 @@ namespace OverlayHUD
             alive = ReadEnemySpawned(p); TryConvertFloat(ReadMember(p, "DespawnedTimer"), out float realTimer);
             if (instance != null && candidate.Root != null)
             {
-                int id = candidate.Root.GetInstanceID();
+                int stableId = instance.GetStableEnemyId(candidate);
                 if (!alive)
                 {
                     if (CachedIsMasterClient())
                     {
                         remaining = realTimer;
-                        if (realTimer > 0f && (!instance.lastTimerSyncSentAt.TryGetValue(id, out float lastSent) || Time.realtimeSinceStartup - lastSent > 4f))
+                        bool justDied = instance.lastAliveBySourceId.TryGetValue(stableId, out bool wasAlive) && wasAlive;
+                        if (realTimer > 0f && (justDied || !instance.lastTimerSyncSentAt.TryGetValue(stableId, out float lastSent) || Time.realtimeSinceStartup - lastSent > 4f))
                         {
-                            int viewId = instance.GetEnemyViewId(p, id);
-                            if (viewId != 0) { SendOverlayEvent(new object[] { "TIMER", viewId, realTimer }); instance.lastTimerSyncSentAt[id] = Time.realtimeSinceStartup; }
+                            int viewId = instance.GetEnemyViewId(p, candidate.Root.GetInstanceID());
+                            if (viewId != 0) { SendOverlayEvent(new object[] { "TIMER", viewId, realTimer }); instance.lastTimerSyncSentAt[stableId] = Time.realtimeSinceStartup; }
                         }
-                        instance.clientSimulatedTimers[id] = remaining;
+                        instance.clientSimulatedTimers[stableId] = remaining;
                     }
                     else
                     {
-                        if (!instance.clientSimulatedTimers.TryGetValue(id, out float sim) || (realTimer > 0f && Math.Abs(realTimer - sim) > 1.5f)) instance.clientSimulatedTimers[id] = realTimer;
-                        remaining = instance.clientSimulatedTimers[id];
+                        if (!instance.clientSimulatedTimers.TryGetValue(stableId, out float sim) || (realTimer > 0f && Math.Abs(realTimer - sim) > 1.5f)) instance.clientSimulatedTimers[stableId] = realTimer;
+                        remaining = instance.clientSimulatedTimers[stableId];
                     }
                 }
-                else instance.clientSimulatedTimers[id] = 0f;
+                else instance.clientSimulatedTimers[stableId] = 0f;
             }
             return true;
         }
 
-        private void AddStatusCandidate(Dictionary<int, EnemyCandidate> statusCandidates, Component enemyParent) { GameObject root = GetEnemyRoot(enemyParent); int pId = enemyParent.GetInstanceID(), sId; if (root != null) { sId = root.GetInstanceID(); sourceIdsByEnemyParent[pId] = sId; } else if (!sourceIdsByEnemyParent.TryGetValue(pId, out sId)) return; statusCandidates[sId] = new EnemyCandidate { Component = enemyParent, Root = root, Center = Vector3.zero }; }
+        private void AddStatusCandidate(Dictionary<int, EnemyCandidate> statusCandidates, Component enemyParent) { GameObject root = GetEnemyRoot(enemyParent); int pId = enemyParent.GetInstanceID(); if (root != null) { var cand = new EnemyCandidate { Component = enemyParent, Root = root, Center = Vector3.zero }; int sId = GetStableEnemyId(cand); sourceIdsByEnemyParent[pId] = sId; statusCandidates[sId] = cand; } else if (!sourceIdsByEnemyParent.TryGetValue(pId, out int sId)) return; }
         private void SyncEnemyHealthChanged(object enemyHealthSource) { if (!gameplayActive || enemyHealthSource == null) return; Component enemyParent = ReadMember(ReadMember(enemyHealthSource, "enemy") as Component, "EnemyParent") as Component; SyncEnemyParentStatusChanged(enemyParent); }
         private void ScheduleEnemyParentStatusChanged(Component enemyParent) { if (gameplayActive && enemyParent != null && gameObject.activeInHierarchy) StartCoroutine(SyncEnemyParentStatusChangedNextFrame(enemyParent)); }
         private IEnumerator SyncEnemyParentStatusChangedNextFrame(Component enemyParent) { for (int i = 0; i < 6; i++) { yield return new WaitForSecondsRealtime(0.2f); SyncEnemyParentStatusChanged(enemyParent); } }
-        private void SyncEnemyParentTimerChanged(Component enemyParent)
-        {
-            if (!gameplayActive || enemyParent == null) return;
-            pendingBatchedStatusSync = true;
-        }
-        
-        private void SyncEnemyParentStatusChanged(Component enemyParent)
-        {
-            if (!gameplayActive || enemyParent == null) return;
-            pendingBatchedStatusSync = true;
-        }
+        private void SyncEnemyParentTimerChanged(Component enemyParent) { if (!gameplayActive || enemyParent == null) return; pendingBatchedStatusSync = true; }
+        private void SyncEnemyParentStatusChanged(Component enemyParent) { if (!gameplayActive || enemyParent == null) return; pendingBatchedStatusSync = true; }
 
-        // --- ENEMY, VALUE & NETWORK HELPERS ---
         private static bool ReadEnemySpawned(Component enemyParent) { object sv = ReadMember(enemyParent, "Spawned"); return sv is bool b ? b : (enemyParent.gameObject != null && enemyParent.gameObject.activeInHierarchy); }
         private bool TryGetEnemyHealth(EnemyCandidate candidate, out float health, out float maxHealth)
         {
@@ -522,8 +620,8 @@ namespace OverlayHUD
             }
             if (candidate.Root != null)
             {
-                int id = candidate.Root.GetInstanceID();
-                if (clientSimulatedHealth.TryGetValue(id, out float simH)) { if (hasHealth && health < simH) clientSimulatedHealth[id] = health; else { health = simH; hasHealth = true; } }
+                int stableId = GetStableEnemyId(candidate);
+                if (clientSimulatedHealth.TryGetValue(stableId, out float simH)) { if (hasHealth && health < simH) clientSimulatedHealth[stableId] = health; else { health = simH; hasHealth = true; } }
             }
             if (!hasHealth && maxHealth > 0f) { health = maxHealth; return true; }
             return hasHealth;
@@ -554,18 +652,18 @@ namespace OverlayHUD
         private void MarkMonsterSeen(string monsterName, EnemyCandidate candidate) { bool added = false; lock (seenLock) { if (!seenMonsters.Contains(monsterName)) { seenMonsters.Add(monsterName); added = true; } } if (added || ShouldLogSeen(monsterName)) lastSeenLoggedAt[monsterName] = Time.realtimeSinceStartup; }
         private bool ShouldLogSeen(string monsterName) { if (!debugLogging.Value) return false; if (!lastSeenLoggedAt.TryGetValue(monsterName, out float last)) return true; return Time.realtimeSinceStartup - last >= 30f; }
         private static bool IsNonGameplayLevelName(string levelName) { if (string.IsNullOrWhiteSpace(levelName)) return false; string lower = levelName.ToLowerInvariant(); return lower.Contains("lobby") || lower.Contains("menu") || lower.Contains("splash") || lower.Contains("post") || lower.Contains("death") || lower.Contains("result") || lower.Contains("summary") || lower.Contains("arena"); }
-        private static bool IsNonGameplayContext() { object runManager = ReadMember(AccessTools.TypeByName("RunManager"), "instance"); return IsNonGameplayLevelName(DescribeLevelObject(ReadMember(runManager, "levelCurrent"))) || IsNonGameplayLevelName(SceneManager.GetActiveScene().name); }
+        private static bool IsNonGameplayContext() { object runManager = ReadMember(GetTypeCached("RunManager"), "instance"); return IsNonGameplayLevelName(DescribeLevelObject(ReadMember(runManager, "levelCurrent"))) || IsNonGameplayLevelName(SceneManager.GetActiveScene().name); }
         private static string DescribeCurrentLevel(object runManager) { return DescribeLevelObject(ReadMember(runManager, "levelCurrent")); }
         private static string DescribeLevelObject(object currentLevel) { if (currentLevel == null) return "<null>"; if (currentLevel is UnityEngine.Object unityObject) return string.IsNullOrWhiteSpace(unityObject.name) ? unityObject.ToString() : unityObject.name; return currentLevel.ToString(); }
         private static bool isRunLevelCache = false; private static float nextRunLevelCheck = 0f;
-        private static bool CachedIsRunLevel(string sceneName) { if (sceneName != null) { if (IsNonGameplayLevelName(sceneName)) return false; if (IsRunLevelName(sceneName) || sceneName.ToLowerInvariant().Contains("shop")) return true; } if (Time.unscaledTime > nextRunLevelCheck) { object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "RunIsLevel"); isRunLevelCache = (result is bool value && value) || SceneManager.GetActiveScene().name.ToLowerInvariant().Contains("shop"); nextRunLevelCheck = Time.unscaledTime + 1f; } return isRunLevelCache; }
+        private static bool CachedIsRunLevel(string sceneName) { if (sceneName != null) { if (IsNonGameplayLevelName(sceneName)) return false; if (IsRunLevelName(sceneName) || sceneName.ToLowerInvariant().Contains("shop")) return true; } if (Time.unscaledTime > nextRunLevelCheck) { object result = InvokeNoArgMethod(GetTypeCached("SemiFunc"), "RunIsLevel"); isRunLevelCache = (result is bool value && value) || SceneManager.GetActiveScene().name.ToLowerInvariant().Contains("shop"); nextRunLevelCheck = Time.unscaledTime + 1f; } return isRunLevelCache; }
         private static bool isMasterCache = false; private static float nextMasterCheck = 0f;
-        private static bool CachedIsMasterClient() { if (Time.unscaledTime > nextMasterCheck) { object result = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "IsMasterClientOrSingleplayer"); isMasterCache = result is bool value ? value : false; nextMasterCheck = Time.unscaledTime + 2f; } return isMasterCache; }
-        private int ResolveCurrentLevel() { object runManager = ReadMember(AccessTools.TypeByName("RunManager"), "instance"); object levelsCompleted = ReadMember(runManager, "levelsCompleted"); if (levelsCompleted != null) { try { int level = Math.Max(1, Convert.ToInt32(levelsCompleted) + 1); fallbackLevel = level; return level; } catch { } } return fallbackLevel = Math.Max(1, lastSyncedLevel + 1); }
-        private static bool IsRegularGameplayLevel() { object runManager = ReadMember(AccessTools.TypeByName("RunManager"), "instance"); object currentLevel = ReadMember(runManager, "levelCurrent"); object levelsValue = ReadMember(runManager, "levels"); if (currentLevel != null && levelsValue is IList levels && levels.Contains(currentLevel)) return true; if (IsNamedRunLevel(currentLevel)) return true; return CachedIsRunLevel(null); }
+        private static bool CachedIsMasterClient() { if (Time.unscaledTime > nextMasterCheck) { object result = InvokeNoArgMethod(GetTypeCached("SemiFunc"), "IsMasterClientOrSingleplayer"); isMasterCache = result is bool value ? value : false; nextMasterCheck = Time.unscaledTime + 2f; } return isMasterCache; }
+        private int ResolveCurrentLevel() { object runManager = ReadMember(GetTypeCached("RunManager"), "instance"); object levelsCompleted = ReadMember(runManager, "levelsCompleted"); if (levelsCompleted != null) { try { int level = Math.Max(1, Convert.ToInt32(levelsCompleted) + 1); fallbackLevel = level; return level; } catch { } } return fallbackLevel = Math.Max(1, lastSyncedLevel + 1); }
+        private static bool IsRegularGameplayLevel() { object runManager = ReadMember(GetTypeCached("RunManager"), "instance"); object currentLevel = ReadMember(runManager, "levelCurrent"); object levelsValue = ReadMember(runManager, "levels"); if (currentLevel != null && levelsValue is IList levels && levels.Contains(currentLevel)) return true; if (IsNamedRunLevel(currentLevel)) return true; return CachedIsRunLevel(null); }
         private static bool IsGameplayLevelCandidate(out string details, bool allowExpensiveFallback = false)
         {
-            object runManager = ReadMember(AccessTools.TypeByName("RunManager"), "instance"); object currentLevel = ReadMember(runManager, "levelCurrent"); object levelsValue = ReadMember(runManager, "levels");
+            object runManager = ReadMember(GetTypeCached("RunManager"), "instance"); object currentLevel = ReadMember(runManager, "levelCurrent"); object levelsValue = ReadMember(runManager, "levels");
             string currentLevelName = DescribeLevelObject(currentLevel); bool nonGameplayCurrent = IsNonGameplayLevelName(currentLevelName);
             bool listedLevel = !nonGameplayCurrent && currentLevel != null && levelsValue is IList levels && levels.Contains(currentLevel); bool namedLevel = IsNamedRunLevel(currentLevel);
             bool runLevel = !nonGameplayCurrent && CachedIsRunLevel(null); bool hasLevelGenerator = false;
@@ -577,16 +675,16 @@ namespace OverlayHUD
             if (nonGameplayCurrent || nonGameplayScene) return false;
             return levelGenerated && (listedLevel || namedLevel || runLevel || hasLevelGenerator || IsRunLevelName(activeSceneName) || isShop || !string.IsNullOrWhiteSpace(activeNamedLevelObject));
         }
-        private static bool HasActiveLevelGenerator() { Type type = AccessTools.TypeByName("LevelGenerator"); if (type == null) return false; foreach (var generator in Resources.FindObjectsOfTypeAll(type)) if (generator is Component component && component.gameObject != null && component.gameObject.scene.IsValid()) return true; return false; }
-        private static bool IsLevelGenerated() { Type type = AccessTools.TypeByName("LevelGenerator"); object levelGenerator = ReadMember(type, "Instance") ?? ReadMember(type, "instance"); return ReadMember(levelGenerator, "Generated") is bool value && value; }
+        private static bool HasActiveLevelGenerator() { Type type = GetTypeCached("LevelGenerator"); if (type == null) return false; foreach (var generator in Resources.FindObjectsOfTypeAll(type)) if (generator is Component component && component.gameObject != null && component.gameObject.scene.IsValid()) return true; return false; }
+        private static bool IsLevelGenerated() { Type type = GetTypeCached("LevelGenerator"); object levelGenerator = ReadMember(type, "Instance") ?? ReadMember(type, "instance"); return ReadMember(levelGenerator, "Generated") is bool value && value; }
         private static string FindActiveNamedRunLevelObject() { foreach (var obj in Resources.FindObjectsOfTypeAll(typeof(GameObject))) if (obj is GameObject go && go.scene.IsValid() && IsRunLevelName(go.name)) return go.name; return ""; }
         private static bool IsNamedRunLevel(object currentLevel) { return IsRunLevelName(DescribeLevelObject(currentLevel)); }
         private static bool IsRunLevelName(string levelName) { return !string.IsNullOrWhiteSpace(levelName) && levelName.StartsWith("Level - ", StringComparison.Ordinal) && !IsNonGameplayLevelName(levelName); }
 
         private void SyncPlayerUpgradesIfChanged(HashSet<string> onlyKeys = null)
         {
-            object statsManager = ReadMember(AccessTools.TypeByName("StatsManager"), "instance"); if (statsManager == null) return;
-            var aliveSteamIds = new HashSet<string>(); Type playerAvatarType = AccessTools.TypeByName("PlayerAvatar");
+            object statsManager = ReadMember(GetTypeCached("StatsManager"), "instance"); if (statsManager == null) return;
+            var aliveSteamIds = new HashSet<string>(); Type playerAvatarType = GetTypeCached("PlayerAvatar");
             if (playerAvatarType != null)
             {
                 foreach (var avatar in Resources.FindObjectsOfTypeAll(playerAvatarType))
@@ -601,7 +699,6 @@ namespace OverlayHUD
             var currentUpgradesByPlayer = new Dictionary<string, Dictionary<string, int>>();
             bool anyChanged = false;
 
-            // Собираем полную и актуальную картину ВСЕХ игроков
             for (int index = 0; index < TrackedPlayerUpgrades.Length; index++)
             {
                 KeyValuePair<string, string> binding = TrackedPlayerUpgrades[index];
@@ -624,14 +721,12 @@ namespace OverlayHUD
                 }
             }
 
-            // Если ничего не изменилось и это не старт новой игры (когда onlyKeys != null) — не спамим
             if (!anyChanged && onlyKeys == null) return;
 
             string localId = ResolveLocalPlayerSteamId();
             var json = new StringBuilder("{\"localSteamId\":\"").Append(localId ?? "").Append("\",\"players\":[");
             int playerCount = 0;
 
-            // Отправляем полный список на сервер
             foreach (var kvp in currentUpgradesByPlayer)
             {
                 string steamId = kvp.Key; var playerUpgrades = kvp.Value;
@@ -646,10 +741,9 @@ namespace OverlayHUD
             if (gameObject.activeInHierarchy) StartCoroutine(PostPlayerUpgrades(json.ToString(), playerCount));
         }
 
-        private static string ResolvePlayerName(string steamId) { Type playerAvatarType = AccessTools.TypeByName("PlayerAvatar"); if (playerAvatarType == null) return null; foreach (var avatar in Resources.FindObjectsOfTypeAll(playerAvatarType)) { if ((ReadMember(avatar, "steamID") as string) == steamId) return ReadMember(avatar, "playerName") as string; } return null; }
-        private static string ResolveLocalPlayerSteamId() { object playerController = ReadMember(AccessTools.TypeByName("PlayerController"), "instance"); string steamId = ReadMember(playerController, "playerSteamID") as string; return !string.IsNullOrEmpty(steamId) ? steamId : ReadMember(ReadMember(playerController, "playerAvatarScript"), "steamID") as string; }
+        private static string ResolvePlayerName(string steamId) { Type playerAvatarType = GetTypeCached("PlayerAvatar"); if (playerAvatarType == null) return null; foreach (var avatar in Resources.FindObjectsOfTypeAll(playerAvatarType)) { if ((ReadMember(avatar, "steamID") as string) == steamId) return ReadMember(avatar, "playerName") as string; } return null; }
+        private static string ResolveLocalPlayerSteamId() { object playerController = ReadMember(GetTypeCached("PlayerController"), "instance"); string steamId = ReadMember(playerController, "playerSteamID") as string; return !string.IsNullOrEmpty(steamId) ? steamId : ReadMember(ReadMember(playerController, "playerAvatarScript"), "steamID") as string; }
 
-        // --- HELPER COMPACTED METHODS ---
         private static int ReadIntMember(object source, string memberName) { object value = ReadMember(source, memberName); if (value == null) return 0; try { return Convert.ToInt32(value, CultureInfo.InvariantCulture); } catch { return 0; } }
         private static float ReadFloatMember(object source, string memberName) { object value = ReadMember(source, memberName); if (value == null) return 0f; try { return Convert.ToSingle(value, CultureInfo.InvariantCulture); } catch { return 0f; } }
         private static object GetValuableSource(object source) { Component valuable = GetValuableComponent(source); return valuable != null ? valuable : source; }
@@ -657,20 +751,20 @@ namespace OverlayHUD
         private static int GetUnityObjectId(object source) { return source is UnityEngine.Object unityObject ? unityObject.GetInstanceID() : 0; }
         private static bool ReferencesSameUnityObject(object left, object right) { int leftId = GetUnityObjectId(left); if (leftId == 0) return false; if (leftId == GetUnityObjectId(right)) return true; Component lv = GetValuableComponent(left), rv = GetValuableComponent(right); if (lv != null && rv != null && lv.GetInstanceID() == rv.GetInstanceID()) return true; GameObject lg = GetGameObject(left), rg = GetGameObject(right); return lg != null && rg != null && lg.GetInstanceID() == rg.GetInstanceID(); }
         private static int GetValuableKey(object source) { object valuable = GetValuableSource(source); if (valuable == null) return 0; object photonView = ReadMember(valuable, "photonView"); int photonViewId = ReadIntMember(photonView, "ViewID"); if (photonViewId > 0) return photonViewId; if (valuable is UnityEngine.Object unityObject) return unityObject.GetInstanceID(); return 0; }
-        private static bool IsValuableInDollarHaul(object source) { int key = GetValuableKey(source); if (key != 0 && valuablesInDollarHaul.Contains(key)) return true; object roundDirector = ReadMember(AccessTools.TypeByName("RoundDirector"), "instance"); if (!(ReadMember(roundDirector, "dollarHaulList") is IEnumerable dollarHaulList)) return false; foreach (object item in dollarHaulList) { if (item == null) continue; int itemKey = GetValuableKey(item); if (key != 0 && itemKey == key) return true; if (ReferencesSameUnityObject(source, item)) return true; } return false; }
+        private static bool IsValuableInDollarHaul(object source) { int key = GetValuableKey(source); if (key != 0 && valuablesInDollarHaul.Contains(key)) return true; object roundDirector = ReadMember(GetTypeCached("RoundDirector"), "instance"); if (!(ReadMember(roundDirector, "dollarHaulList") is IEnumerable dollarHaulList)) return false; foreach (object item in dollarHaulList) { if (item == null) continue; int itemKey = GetValuableKey(item); if (key != 0 && itemKey == key) return true; if (ReferencesSameUnityObject(source, item)) return true; } return false; }
         private static void TrackDollarHaulValuable(object source, bool inHaul) { if (!CachedIsRunLevel(null)) return; int key = GetValuableKey(source); if (key == 0) return; if (inHaul) valuablesInDollarHaul.Add(key); else valuablesInDollarHaul.Remove(key); }
         private static float ReadValuableOriginalValue(object source) { return ReadFloatMember(GetValuableSource(source), "dollarValueOriginal"); }
         private static float ReadValuableCurrentValue(object source) { return ReadFloatMember(GetValuableSource(source), "dollarValueCurrent"); }
         private static Component GetValuableComponent(object source) { if (source is Component component) { Component val = component.GetComponent("ValuableObject"); if (val != null) return val; } if (source is GameObject gameObject) return gameObject.GetComponent("ValuableObject"); return null; }
-        private static int? ResolveExtractionGoal() { object roundDirector = ReadMember(AccessTools.TypeByName("RoundDirector"), "instance"); object goal = ReadMember(roundDirector, "extractionHaulGoal"); if (goal == null) return null; try { return Math.Max(0, Convert.ToInt32(goal)); } catch { return null; } }
-        private static float CalculateMapValue() { Type valuableType = AccessTools.TypeByName("ValuableObject"); if (valuableType == null) return 0f; float total = 0f; foreach (var val in UnityEngine.Object.FindObjectsOfType(valuableType)) total += ReadValuableCurrentValue(val); return Math.Max(0f, total); }
-        private string ResolveCurrentLevelName() { object currentLevel = ReadMember(ReadMember(AccessTools.TypeByName("RunManager"), "instance"), "levelCurrent"); string levelName = DescribeLevelObject(currentLevel); return levelName == "<null>" ? "" : levelName; }
+        private static int? ResolveExtractionGoal() { object roundDirector = ReadMember(GetTypeCached("RoundDirector"), "instance"); object goal = ReadMember(roundDirector, "extractionHaulGoal"); if (goal == null) return null; try { return Math.Max(0, Convert.ToInt32(goal)); } catch { return null; } }
+        private static float CalculateMapValue() { Type valuableType = GetTypeCached("ValuableObject"); if (valuableType == null) return 0f; float total = 0f; foreach (var val in UnityEngine.Object.FindObjectsOfType(valuableType)) total += ReadValuableCurrentValue(val); return Math.Max(0f, total); }
+        private string ResolveCurrentLevelName() { object currentLevel = ReadMember(ReadMember(GetTypeCached("RunManager"), "instance"), "levelCurrent"); string levelName = DescribeLevelObject(currentLevel); return levelName == "<null>" ? "" : levelName; }
         private void SyncLevelToOverlay(int level, string levelName) { lastSyncedLevel = level; if (gameObject.activeInHierarchy) StartCoroutine(PostLevel(level, levelName)); lastSyncedUpgrades.Clear(); pendingUpgradeKeys.Clear(); for (int index = 0; index < TrackedPlayerUpgrades.Length; index++) pendingUpgradeKeys.Add(TrackedPlayerUpgrades[index].Key); nextUpgradeSyncAt = Time.realtimeSinceStartup + 2f; }
         private static Camera FindBestCamera() { if (Camera.main != null) return Camera.main; Camera best = null; float bestDepth = float.MinValue; foreach (Camera camera in Camera.allCameras) { if (camera == null || !camera.isActiveAndEnabled) continue; if (camera.depth >= bestDepth) { best = camera; bestDepth = camera.depth; } } return best; }
         private List<EnemyCandidate> FindEnemyCandidates() { var result = new List<EnemyCandidate>(); var seenRoots = new HashSet<int>(); foreach (Component component in GetKnownEnemyParentsSnapshot()) AddEnemyCandidate(result, seenRoots, component); foreach (Component component in FindSpawnedEnemiesFromDirector()) AddEnemyCandidate(result, seenRoots, component); float now = Time.realtimeSinceStartup; bool runBroadDiscovery = !rosterPublished && result.Count == 0 && broadEnemyDiscoveryAttempts < 3 && now >= nextBroadEnemyDiscoveryAt; if (runBroadDiscovery) { broadEnemyDiscoveryAttempts++; nextBroadEnemyDiscoveryAt = now + 5f; foreach (Component component in FindComponentsByTypeName("EnemyParent")) AddEnemyCandidate(result, seenRoots, component); if (result.Count == 0) foreach (Component component in FindComponentsByTypeName("Enemy")) AddEnemyCandidate(result, seenRoots, component); } return result; }
         private static void RegisterEnemyParent(Component component) { if (component == null) return; lock (enemyLock) { knownEnemyParents.RemoveAll((enemy) => enemy == null); if (!knownEnemyParents.Contains(component)) { knownEnemyParents.Add(component); if (Plugin.instance != null) { Plugin.instance.enemyRosterDirty = true; Plugin.instance.nextScanAt = 0f; } } } }
         private static List<Component> GetKnownEnemyParentsSnapshot() { lock (enemyLock) { knownEnemyParents.RemoveAll((enemy) => enemy == null); return new List<Component>(knownEnemyParents); } }
-        private static IEnumerable<Component> FindSpawnedEnemiesFromDirector(bool allowExpensiveFallback = false) { Type directorType = Type.GetType("EnemyDirector, Assembly-CSharp"); if (directorType == null) yield break; object instance = ReadMember(directorType, "instance"); if (instance != null) { foreach (Component component in EnumerateSpawnedEnemies(instance)) yield return component; yield break; } if (!allowExpensiveFallback) yield break; foreach (UnityEngine.Object director in Resources.FindObjectsOfTypeAll(directorType)) foreach (Component component in EnumerateSpawnedEnemies(director)) yield return component; }
+        private static IEnumerable<Component> FindSpawnedEnemiesFromDirector(bool allowExpensiveFallback = false) { Type directorType = GetTypeCached("EnemyDirector"); if (directorType == null) yield break; object instance = ReadMember(directorType, "instance"); if (instance != null) { foreach (Component component in EnumerateSpawnedEnemies(instance)) yield return component; yield break; } if (!allowExpensiveFallback) yield break; foreach (UnityEngine.Object director in Resources.FindObjectsOfTypeAll(directorType)) foreach (Component component in EnumerateSpawnedEnemies(director)) yield return component; }
         private static IEnumerable<Component> EnumerateSpawnedEnemies(object director) { object spawned = ReadMember(director, "enemiesSpawned"); if (!(spawned is IEnumerable enumerable)) yield break; foreach (object item in enumerable) if (item is Component component) yield return component; }
         private static IEnumerable<Component> FindComponentsByTypeName(string typeName) { Type type = Type.GetType(typeName + ", Assembly-CSharp"); if (type == null || !typeof(Component).IsAssignableFrom(type)) yield break; foreach (UnityEngine.Object obj in Resources.FindObjectsOfTypeAll(type)) if (obj is Component component) yield return component; }
         private static void AddEnemyCandidate(List<EnemyCandidate> result, HashSet<int> seenRoots, Component component) { if (component == null) return; GameObject root = GetEnemyRoot(component); if (root == null || !root.activeInHierarchy) return; Component enemyParent = component.GetType().Name == "EnemyParent" ? component : ReadMember(component, "EnemyParent") as Component; if (enemyParent != null) RegisterEnemyParent(enemyParent); int id = root.GetInstanceID(); if (!seenRoots.Add(id)) return; result.Add(new EnemyCandidate { Component = component, Root = root, Center = GetObjectCenter(root) }); }
@@ -682,50 +776,45 @@ namespace OverlayHUD
         private static bool IsEnemyParentPlayerClose(Component enemyParent) { return ReadMember(enemyParent, "playerClose") is bool b && b; }
         private static bool IsEnemyParentPlayerVeryClose(Component enemyParent) { return ReadMember(enemyParent, "playerVeryClose") is bool b && b; }
         private bool IsEnemyOnScreenVisible(Component enemyOnScreen) { return ReadMember(enemyOnScreen, "OnScreenLocal") is bool isOnScreen && isOnScreen && (!(ReadMember(enemyOnScreen, "CulledLocal") is bool isCulled) || !isCulled); }
-        private static IEnumerator WatchBlindEnemyPlayerClose(IEnumerator inner, Component enemyParent) { bool wasPlayerClose = IsEnemyParentPlayerClose(enemyParent); bool wasPlayerVeryClose = instance != null && IsEnemyParentPlayerVeryClose(enemyParent); while (inner.MoveNext()) { yield return inner.Current; Plugin plugin = instance; if (plugin == null || !plugin.gameplayActive || enemyParent == null) continue; bool isPlayerClose = IsEnemyParentPlayerClose(enemyParent); bool isPlayerVeryClose = IsEnemyParentPlayerVeryClose(enemyParent); if (isPlayerClose != wasPlayerClose || isPlayerVeryClose != wasPlayerVeryClose) plugin.SyncEnemyParentStatusChanged(enemyParent); if (isPlayerVeryClose && !wasPlayerVeryClose && (!plugin.preferPlayerVisionDetection.Value || !HasEnemyOnScreen(enemyParent) || ShouldUseLegacyVisionFallback(enemyParent))) plugin.HandleBlindEnemyPlayerVeryClose(enemyParent); wasPlayerClose = isPlayerClose; wasPlayerVeryClose = isPlayerVeryClose; } }
-        private static IEnumerator WatchEnemyOnScreen(IEnumerator inner, Component enemyOnScreen) { Component enemyParent = null; int instanceId = 0; bool encounterHandled = false; while (inner.MoveNext()) { yield return inner.Current; Plugin plugin = instance; if (plugin == null || !plugin.gameplayActive || enemyOnScreen == null || encounterHandled || !plugin.preferPlayerVisionDetection.Value) continue; if (enemyParent == null) enemyParent = GetEnemyParentFromOnScreen(enemyOnScreen); if (enemyParent == null) continue; if (instanceId == 0) instanceId = ResolveEnemyInstanceId(enemyParent); if (instanceId != 0 && IsEnemySent(instanceId)) { encounterHandled = true; continue; } if (!plugin.IsEnemyOnScreenVisible(enemyOnScreen)) continue; plugin.HandleEnemyOnScreenVisible(enemyParent, ref instanceId); if (instanceId != 0 && IsEnemySent(instanceId)) encounterHandled = true; } }
-        private void HandleBlindEnemyPlayerVeryClose(Component enemyParent) { if (enemyParent == null || HasEnemyVision(enemyParent)) return; if (preferPlayerVisionDetection.Value && HasEnemyOnScreen(enemyParent) && !ShouldUseLegacyVisionFallback(enemyParent)) return; int instanceId = ResolveEnemyInstanceId(enemyParent); if (instanceId == 0 || IsEnemySent(instanceId)) return; RegisterEnemyParent(enemyParent); string monsterName = null; if (PublishEnemyParentEncounter(enemyParent, ref instanceId, ref monsterName)) return; pendingEncounterIds.Add(instanceId); enemyRosterDirty = true; nextScanAt = 0f; }
-        private void HandleEnemyOnScreenVisible(Component enemyParent, ref int instanceId) { if (!preferPlayerVisionDetection.Value || enemyParent == null) return; if (instanceId == 0) instanceId = ResolveEnemyInstanceId(enemyParent); if (instanceId == 0 || IsEnemySent(instanceId)) return; RegisterEnemyParent(enemyParent); string monsterName = null; if (PublishEnemyParentEncounter(enemyParent, ref instanceId, ref monsterName)) return; pendingEncounterIds.Add(instanceId); enemyRosterDirty = true; nextScanAt = 0f; }
-        private bool PublishEnemyParentEncounter(Component enemyParent, ref int instanceId, ref string monsterName)
+
+        private void HandleBlindEnemyPlayerVeryClose(Component enemyParent) { if (enemyParent == null || HasEnemyVision(enemyParent)) return; if (preferPlayerVisionDetection.Value && HasEnemyOnScreen(enemyParent) && !ShouldUseLegacyVisionFallback(enemyParent)) return; var candidate = new EnemyCandidate { Component = enemyParent, Root = GetEnemyRoot(enemyParent) }; int stableId = GetStableEnemyId(candidate); if (stableId == 0 || IsEnemySent(stableId)) return; RegisterEnemyParent(enemyParent); string monsterName = null; if (PublishEnemyParentEncounter(enemyParent, ref stableId, ref monsterName)) return; pendingEncounterIds.Add(stableId); enemyRosterDirty = true; nextScanAt = 0f; }
+        private void HandleEnemyOnScreenVisible(Component enemyParent, ref int stableId) { if (!preferPlayerVisionDetection.Value || enemyParent == null) return; if (stableId == 0) stableId = GetStableEnemyId(new EnemyCandidate { Component = enemyParent, Root = GetEnemyRoot(enemyParent) }); if (stableId == 0 || IsEnemySent(stableId)) return; RegisterEnemyParent(enemyParent); string monsterName = null; if (PublishEnemyParentEncounter(enemyParent, ref stableId, ref monsterName)) return; pendingEncounterIds.Add(stableId); enemyRosterDirty = true; nextScanAt = 0f; }
+        private bool PublishEnemyParentEncounter(Component enemyParent, ref int stableId, ref string monsterName)
         {
             if (!rosterPublished || enemyParent == null) return false; GameObject root = GetEnemyRoot(enemyParent); if (root == null) return false;
-            if (instanceId == 0) instanceId = root.GetInstanceID(); if (instanceId == 0 || IsEnemySent(instanceId)) return true;
-            if (monsterName == null) { monsterName = ResolveMonsterName(enemyParent); if (monsterName != null) resolvedMonsterNames[instanceId] = monsterName; }
-            if (monsterName == null) return false;
-            if (!TryMarkEnemySent(instanceId)) return true;
             var candidate = new EnemyCandidate { Component = enemyParent, Root = root, Center = GetObjectCenter(root) };
+            if (stableId == 0) stableId = GetStableEnemyId(candidate);
+            if (stableId == 0 || IsEnemySent(stableId)) return true;
+            if (monsterName == null) { monsterName = ResolveMonsterName(enemyParent); if (monsterName != null) resolvedMonsterNames[stableId] = monsterName; }
+            if (monsterName == null) return false;
+            if (!TryMarkEnemySent(stableId)) return true;
             MarkMonsterSeen(monsterName, candidate);
-            if (gameObject.activeInHierarchy) StartCoroutine(PostSeenMonster(monsterName, instanceId));
+            if (gameObject.activeInHierarchy) StartCoroutine(PostSeenMonster(monsterName, stableId));
 
-            // СЕТЕВАЯ МАГИЯ ХОСТА: Сообщаем другим клиентам, что мы увидели моба
-            int viewId = GetEnemyViewId(enemyParent, instanceId);
+            int viewId = GetEnemyViewId(enemyParent, root.GetInstanceID());
             if (viewId != 0) SendOverlayEvent(new object[] { "SPOT", viewId, monsterName });
 
             SyncEnemyParentStatusChanged(enemyParent); return true;
         }
-        private void HandleEnemyVisionTrigger(object vision, int playerId) { if (!gameplayActive || vision == null || playerId != GetLocalPlayerViewId()) return; if (!TryGetVisionEnemyCache(vision, out VisionEnemyCache visionEnemy)) return; Component enemyParent = visionEnemy.EnemyParent; if (preferPlayerVisionDetection.Value && HasEnemyOnScreen(enemyParent) && !ShouldUseLegacyVisionFallback(enemyParent)) return; int instanceId = visionEnemy.InstanceId; if (instanceId == 0 || IsEnemySent(instanceId) || pendingEncounterIds.Contains(instanceId)) return; RegisterEnemyParent(enemyParent); string monsterName = null; if (PublishEnemyParentEncounter(enemyParent, ref instanceId, ref monsterName)) { pendingEncounterIds.Remove(instanceId); return; } pendingEncounterIds.Add(instanceId); enemyRosterDirty = true; nextScanAt = 0f; }
-        private bool TryGetVisionEnemyCache(object vision, out VisionEnemyCache visionEnemy) { visionEnemy = default; int visionId = GetUnityObjectId(vision); if (visionId != 0 && visionEnemyCacheByVisionId.TryGetValue(visionId, out visionEnemy) && visionEnemy.EnemyParent != null && visionEnemy.InstanceId != 0) return true; Component enemy = ReadMember(vision, "Enemy") as Component; Component enemyParent = ReadMember(enemy, "EnemyParent") as Component; if (enemyParent == null) return false; int instanceId = ResolveEnemyInstanceId(enemyParent); if (instanceId == 0) return false; visionEnemy = new VisionEnemyCache { EnemyParent = enemyParent, InstanceId = instanceId }; if (visionId != 0) visionEnemyCacheByVisionId[visionId] = visionEnemy; return true; }
-        private void TryPublishPendingVisionEncounters(List<ResolvedEnemyCandidate> resolvedEnemies) { if (pendingEncounterIds.Count == 0) return; foreach (var resolvedEnemy in resolvedEnemies) { int instanceId = resolvedEnemy.Candidate.Root.GetInstanceID(); if (!pendingEncounterIds.Contains(instanceId)) continue; Component enemyParent = GetEnemyParent(resolvedEnemy.Candidate); string monsterName = resolvedEnemy.MonsterName; int publishId = instanceId; if (PublishEnemyParentEncounter(enemyParent, ref publishId, ref monsterName)) pendingEncounterIds.Remove(instanceId); } }
+        private void HandleEnemyVisionTrigger(object vision, int playerId) { if (!gameplayActive || vision == null || playerId != GetLocalPlayerViewId()) return; if (!TryGetVisionEnemyCache(vision, out VisionEnemyCache visionEnemy)) return; Component enemyParent = visionEnemy.EnemyParent; if (preferPlayerVisionDetection.Value && HasEnemyOnScreen(enemyParent) && !ShouldUseLegacyVisionFallback(enemyParent)) return; int stableId = visionEnemy.StableId; if (stableId == 0 || IsEnemySent(stableId) || pendingEncounterIds.Contains(stableId)) return; RegisterEnemyParent(enemyParent); string monsterName = null; if (PublishEnemyParentEncounter(enemyParent, ref stableId, ref monsterName)) { pendingEncounterIds.Remove(stableId); return; } pendingEncounterIds.Add(stableId); enemyRosterDirty = true; nextScanAt = 0f; }
+        private bool TryGetVisionEnemyCache(object vision, out VisionEnemyCache visionEnemy) { visionEnemy = default; int visionId = GetUnityObjectId(vision); if (visionId != 0 && visionEnemyCacheByVisionId.TryGetValue(visionId, out visionEnemy) && visionEnemy.EnemyParent != null && visionEnemy.StableId != 0) return true; Component enemy = ReadMember(vision, "Enemy") as Component; Component enemyParent = ReadMember(enemy, "EnemyParent") as Component; if (enemyParent == null) return false; int stableId = GetStableEnemyId(new EnemyCandidate { Component = enemyParent, Root = GetEnemyRoot(enemyParent) }); if (stableId == 0) return false; visionEnemy = new VisionEnemyCache { EnemyParent = enemyParent, StableId = stableId }; if (visionId != 0) visionEnemyCacheByVisionId[visionId] = visionEnemy; return true; }
+        private void TryPublishPendingVisionEncounters(List<ResolvedEnemyCandidate> resolvedEnemies) { if (pendingEncounterIds.Count == 0) return; foreach (var resolvedEnemy in resolvedEnemies) { int stableId = GetStableEnemyId(resolvedEnemy.Candidate); if (!pendingEncounterIds.Contains(stableId)) continue; Component enemyParent = GetEnemyParent(resolvedEnemy.Candidate); string monsterName = resolvedEnemy.MonsterName; int publishId = stableId; if (PublishEnemyParentEncounter(enemyParent, ref publishId, ref monsterName)) pendingEncounterIds.Remove(stableId); } }
         private static bool HasEnemyVision(Component enemyParent) { if (enemyParent == null) return false; Plugin plugin = instance; if (plugin != null) { int parentId = enemyParent.GetInstanceID(); if (plugin.enemyHasVisionByParentId.TryGetValue(parentId, out bool cachedValue)) return cachedValue; bool value = ReadEnemyHasVision(enemyParent); plugin.enemyHasVisionByParentId[parentId] = value; return value; } return ReadEnemyHasVision(enemyParent); }
         private static bool ReadEnemyHasVision(Component enemyParent) { return ReadMember(ReadMember(enemyParent, "Enemy") as Component, "HasVision") is bool b && b; }
         private static bool HasEnemyOnScreen(Component enemyParent) { if (enemyParent == null) return false; Plugin plugin = instance; if (plugin != null) { int parentId = enemyParent.GetInstanceID(); if (plugin.enemyHasOnScreenByParentId.TryGetValue(parentId, out bool cachedValue)) return cachedValue; bool value = ReadEnemyHasOnScreen(enemyParent); plugin.enemyHasOnScreenByParentId[parentId] = value; return value; } return ReadEnemyHasOnScreen(enemyParent); }
         private static bool ReadEnemyHasOnScreen(Component enemyParent) { Component enemy = ReadMember(enemyParent, "Enemy") as Component; if (ReadMember(enemy, "HasOnScreen") is bool value) return value; return enemy != null && enemy.GetComponent("EnemyOnScreen") != null; }
         private static Component GetEnemyParentFromOnScreen(Component enemyOnScreen) { if (enemyOnScreen == null) return null; Component enemy = ReadMember(enemyOnScreen, "Enemy") as Component; if (enemy == null) enemy = enemyOnScreen.GetComponent("Enemy"); return ReadMember(enemy, "EnemyParent") as Component; }
-        private static int ResolveEnemyInstanceId(Component enemyParent) { GameObject root = enemyParent == null ? null : GetEnemyRoot(enemyParent); return root == null ? 0 : root.GetInstanceID(); }
         private int GetLocalPlayerViewId() { if (cachedLocalPlayerViewId != int.MinValue) return cachedLocalPlayerViewId; cachedLocalPlayerViewId = ResolveLocalPlayerViewId(); return cachedLocalPlayerViewId; }
-        private static int ResolveLocalPlayerViewId() { object localViewId = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "PhotonViewIDPlayerAvatarLocal"); if (localViewId != null) try { return Convert.ToInt32(localViewId, CultureInfo.InvariantCulture); } catch { } object player = InvokeNoArgMethod(AccessTools.TypeByName("SemiFunc"), "PlayerAvatarLocal"); if (player == null) player = ReadMember(AccessTools.TypeByName("PlayerAvatar"), "instance"); return ReadIntMember(ReadMember(player, "photonView"), "ViewID"); }
+        private static int ResolveLocalPlayerViewId() { object localViewId = InvokeNoArgMethod(GetTypeCached("SemiFunc"), "PhotonViewIDPlayerAvatarLocal"); if (localViewId != null) try { return Convert.ToInt32(localViewId, CultureInfo.InvariantCulture); } catch { } object player = InvokeNoArgMethod(GetTypeCached("SemiFunc"), "PlayerAvatarLocal"); if (player == null) player = ReadMember(GetTypeCached("PlayerAvatar"), "instance"); return ReadIntMember(ReadMember(player, "photonView"), "ViewID"); }
 
         private static object ReadMember(object source, string memberName)
         {
-            if (source == null) return null; Type type = source as Type ?? source.GetType(); Dictionary<string, MemberInfo> typeCache;
-            lock (reflectionCacheLock) { if (!fastMemberCache.TryGetValue(type, out typeCache)) { typeCache = new Dictionary<string, MemberInfo>(); fastMemberCache[type] = typeCache; } }
-            MemberInfo member; lock (reflectionCacheLock)
+            if (source == null) return null; Type type = source as Type ?? source.GetType();
+            if (!fastMemberCache.TryGetValue(type, out var typeCache)) { typeCache = new Dictionary<string, MemberInfo>(); fastMemberCache[type] = typeCache; }
+            if (!typeCache.TryGetValue(memberName, out var member))
             {
-                if (!typeCache.TryGetValue(memberName, out member))
-                {
-                    member = type.GetField(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static) as MemberInfo ?? type.GetProperty(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-                    typeCache[memberName] = member;
-                }
+                member = type.GetField(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static) as MemberInfo ?? type.GetProperty(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                typeCache[memberName] = member;
             }
             if (member == null) return null;
             if (member is FieldInfo field) return (!field.IsStatic && source is Type) ? null : field.GetValue(field.IsStatic ? null : source);
@@ -735,15 +824,12 @@ namespace OverlayHUD
 
         private static object InvokeNoArgMethod(object source, string methodName)
         {
-            if (source == null) return null; Type type = source as Type ?? source.GetType(); Dictionary<string, MethodInfo> typeCache;
-            lock (reflectionCacheLock) { if (!fastNoArgMethodCache.TryGetValue(type, out typeCache)) { typeCache = new Dictionary<string, MethodInfo>(); fastNoArgMethodCache[type] = typeCache; } }
-            MethodInfo method; lock (reflectionCacheLock)
+            if (source == null) return null; Type type = source as Type ?? source.GetType();
+            if (!fastNoArgMethodCache.TryGetValue(type, out var typeCache)) { typeCache = new Dictionary<string, MethodInfo>(); fastNoArgMethodCache[type] = typeCache; }
+            if (!typeCache.TryGetValue(methodName, out var method))
             {
-                if (!typeCache.TryGetValue(methodName, out method))
-                {
-                    method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static, null, Type.EmptyTypes, null);
-                    typeCache[methodName] = method;
-                }
+                method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static, null, Type.EmptyTypes, null);
+                typeCache[methodName] = method;
             }
             if (method == null || (!method.IsStatic && source is Type)) return null;
             try { return method.Invoke(method.IsStatic ? null : source, null); } catch { return null; }
@@ -801,6 +887,6 @@ namespace OverlayHUD
 
         private struct EnemyCandidate { public Component Component; public GameObject Root; public Vector3 Center; }
         private struct ResolvedEnemyCandidate { public EnemyCandidate Candidate; public string MonsterName; }
-        private struct VisionEnemyCache { public Component EnemyParent; public int InstanceId; }
+        private struct VisionEnemyCache { public Component EnemyParent; public int StableId; }
     }
 }
