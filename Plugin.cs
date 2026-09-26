@@ -20,7 +20,7 @@ using UnityEngine.SceneManagement;
 namespace OverlayHUD
 {
     [BepInPlugin("local.overlay.overlay_hud", "OverlayHUD", "26.8.0")]
-    public sealed class Plugin : BaseUnityPlugin
+    public sealed class Plugin : BaseUnityPlugin, Photon.Realtime.IOnEventCallback
     {
         private static Plugin instance;
         private static readonly List<string> seenMonsters = new List<string>();
@@ -66,7 +66,7 @@ namespace OverlayHUD
         private readonly Dictionary<int, int> instanceIdByViewId = new Dictionary<int, int>();
         private readonly Dictionary<int, int> viewIdByInstanceId = new Dictionary<int, int>();
         private readonly Dictionary<int, float> lastTimerSyncSentAt = new Dictionary<int, float>();
-        private readonly HashSet<int> viewIdFailedInstanceIds = new HashSet<int>();
+        private readonly Dictionary<int, float> viewIdFailedInstanceIds = new Dictionary<int, float>();
         private readonly List<int> _timerKeysBuffer = new List<int>();
 
         private float nextScanAt, nextStatusSyncAt, nextUpgradeSyncAt, nextMapValueSyncAt, nextBroadEnemyDiscoveryAt, nextStatusDirectorRecoveryAt, scanPausedUntil, nextStatusHeartbeatAt;
@@ -86,11 +86,6 @@ namespace OverlayHUD
         private float nextBatchedStatusSyncAt = 0f;
 
         // Прямое кэширование для перехвата Photon
-        private static PropertyInfo eventCodeProp;
-        private static FieldInfo eventCodeField;
-        private static PropertyInfo eventDataProp;
-        private static FieldInfo eventDataField;
-        private static bool eventReflectInit = false;
 
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -98,6 +93,7 @@ namespace OverlayHUD
         private ConfigEntry<string> endpoint, levelEndpoint, overlayAppRelativePath, overlayAppArchiveName;
         private ConfigEntry<float> scanInterval, statusInterval;
         private ConfigEntry<bool> requireLineOfSight, preferPlayerVisionDetection, debugLogging, autoStartOverlayApp, autoCloseOverlayApp;
+        private ConfigEntry<bool> enableNetworkSync;
         private Harmony harmony;
         private Process launchedOverlayProcess;
 
@@ -121,7 +117,7 @@ namespace OverlayHUD
             requireLineOfSight = Config.Bind("Detection", "RequireLineOfSight", true, "");
             preferPlayerVisionDetection = Config.Bind("Detection", "PreferPlayerVisionDetection", true, "");
             debugLogging = Config.Bind("Debug", "Logging", false, "");
-            autoStartOverlayApp = Config.Bind("OverlayApp", "AutoStart", true, "");
+            enableNetworkSync = Config.Bind("Network", "EnableNetworkSync", true, "Включить синхронизацию оверлея по сети (выключите при конфликтах)"); autoStartOverlayApp = Config.Bind("OverlayApp", "AutoStart", true, "");
             autoCloseOverlayApp = Config.Bind("OverlayApp", "AutoClose", true, "");
             overlayAppRelativePath = Config.Bind("OverlayApp", "ExecutableRelativePath", Path.Combine("OverlayHUD_app", "OverlayHUD.exe"), "");
             overlayAppArchiveName = Config.Bind("OverlayApp", "ArchiveName", "OverlayHUD_app.zip", "");
@@ -129,6 +125,7 @@ namespace OverlayHUD
             Logger.LogInfo("OverlayHUD is running.");
             StartOverlayAppIfNeeded();
             PatchGameUpdates();
+            try { Photon.Pun.PhotonNetwork.AddCallbackTarget(this); } catch { }
         }
 
         private void KeepPluginObjectAlive()
@@ -210,29 +207,22 @@ namespace OverlayHUD
                 if (m19 != null) harmony.Patch(m19, postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(EnemyHealthChangedPostfix))));
                 if (m20 != null) harmony.Patch(m20, postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(EnemyHealthHurtRpcPostfix))));
                 foreach (string mName in UpgradeStateKeyByPunMethod.Keys) { MethodInfo m = AccessTools.Method("PunManager:" + mName); if (m != null) harmony.Patch(m, postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(PlayerUpgradeAppliedPostfix)))); }
-
-                Type lbcType = GetTypeCached("Photon.Realtime.LoadBalancingClient");
-                if (lbcType != null)
-                {
-                    MethodInfo onEventMethod = AccessTools.Method(lbcType, "OnEvent");
-                    if (onEventMethod != null) harmony.Patch(onEventMethod, prefix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(OnPhotonEventPrefix))));
-                }
             }
+
             catch { }
             SceneManager.sceneLoaded += OnSceneLoaded;
         }
 
-        private static void LevelGenerationStartingPrefix() { instance?.ResetMapValue("room generation started"); }
-        private static void LevelChangingPrefix() { instance?.HandleLevelChanging(); }
-        private static void LevelChangedPostfix(object __instance) { instance?.ScheduleGameplayActivation("RunManager.ChangeLevel"); }
-        private static void PlayerUpgradeAppliedPostfix(MethodBase __originalMethod, string _steamID, int __result) { if (__originalMethod != null && UpgradeStateKeyByPunMethod.TryGetValue(__originalMethod.Name, out string k)) instance?.SyncPlayerUpgradeValue(k, _steamID, __result); }
-        private void SyncPlayerUpgradeValue(string stateKey, string steamId, int value) { if (gameplayActive && !string.IsNullOrEmpty(stateKey) && !string.IsNullOrEmpty(steamId)) SyncPlayerUpgradesIfChanged(null); }
-        private static void EnemyParentSpawnedPostfix(object __instance) { if (__instance is Component comp) { RegisterEnemyParent(comp); if (instance != null) { GameObject root = GetEnemyRoot(comp); if (root != null) { var cand = new EnemyCandidate { Component = comp, Root = root, Center = Vector3.zero }; instance.clientSimulatedHealth.Remove(instance.GetStableEnemyId(cand)); } } instance?.SyncEnemyParentStatusChanged(comp); } }
-        private static void EnemyParentDespawnedPostfix(object __instance) { if (__instance is Component comp) instance?.ScheduleEnemyParentStatusChanged(comp); }
-        private static void EnemyParentTimerChangedPostfix(object __instance) { if (__instance is Component comp) instance?.SyncEnemyParentTimerChanged(comp); }
-        private static void EnemyParentPlayerCloseLogicPostfix(object __instance, ref IEnumerator __result) { if (__result != null && __instance is Component ep) __result = WatchBlindEnemyPlayerClose(__result, ep); }
-        private static void EnemyOnScreenLogicPostfix(object __instance, ref IEnumerator __result) { if (__result != null && __instance is Component eos) __result = WatchEnemyOnScreen(__result, eos); }
-
+        private static void LevelGenerationStartingPrefix() { try { instance?.ResetMapValue("room generation started"); } catch { } }
+        private static void LevelChangingPrefix() { try { instance?.HandleLevelChanging(); } catch { } }
+        private static void LevelChangedPostfix(object __instance) { try { instance?.ScheduleGameplayActivation("RunManager.ChangeLevel"); } catch { } }
+        private static void PlayerUpgradeAppliedPostfix(MethodBase __originalMethod, string _steamID, int __result) { try { if (__originalMethod != null && UpgradeStateKeyByPunMethod.TryGetValue(__originalMethod.Name, out string k)) instance?.SyncPlayerUpgradeValue(k, _steamID, __result); } catch { } }
+        private void SyncPlayerUpgradeValue(string stateKey, string steamId, int value) { try { if (gameplayActive && !string.IsNullOrEmpty(stateKey) && !string.IsNullOrEmpty(steamId)) SyncPlayerUpgradesIfChanged(null); } catch { } }
+        private static void EnemyParentSpawnedPostfix(object __instance) { try { if (__instance is Component comp) { RegisterEnemyParent(comp); if (instance != null) { GameObject root = GetEnemyRoot(comp); if (root != null) { var cand = new EnemyCandidate { Component = comp, Root = root, Center = Vector3.zero }; instance.clientSimulatedHealth.Remove(instance.GetStableEnemyId(cand)); } } instance?.SyncEnemyParentStatusChanged(comp); } } catch { } }
+        private static void EnemyParentDespawnedPostfix(object __instance) { try { if (__instance is Component comp) instance?.ScheduleEnemyParentStatusChanged(comp); } catch { } }
+        private static void EnemyParentTimerChangedPostfix(object __instance) { try { if (__instance is Component comp) instance?.SyncEnemyParentTimerChanged(comp); } catch { } }
+        private static void EnemyParentPlayerCloseLogicPostfix(object __instance, ref IEnumerator __result) { try { if (__result != null && __instance is Component ep) __result = WatchBlindEnemyPlayerClose(__result, ep); } catch { } }
+        private static void EnemyOnScreenLogicPostfix(object __instance, ref IEnumerator __result) { try { if (__result != null && __instance is Component eos) __result = WatchEnemyOnScreen(__result, eos); } catch { } }
         // Оптимизировано: проверка идет не каждый кадр, а только каждый 5-й, чтобы снять нагрузку с ЦП
         private static IEnumerator WatchBlindEnemyPlayerClose(IEnumerator inner, Component enemyParent)
         {
@@ -278,33 +268,37 @@ namespace OverlayHUD
             }
         }
 
-        private static void ExtractionCompletedPostfix() { instance?.RefreshMapValue("extraction completed"); }
-        private static void ValuableDollarValueSetRpcPostfix(object __instance, float value) { instance?.ScheduleMapValueRefresh("valuable rpc"); }
-        private static void ValuableDollarValueSetLogicPostfix(object __instance) { if (CachedIsMasterClient()) instance?.ScheduleMapValueRefresh("valuable logic"); }
-        private static void ValuableDollarHaulAddPostfix(object __instance) { TrackDollarHaulValuable(__instance, true); }
-        private static void ValuableDollarHaulRemovePostfix(object __instance) { TrackDollarHaulValuable(__instance, false); }
-        private static void PhysGrabObjectBreakPostfix(object __instance, float valueLost, bool _loseValue) { if (_loseValue) { instance?.AddMapValue(-valueLost, "valuable break"); instance?.AddLostValue(valueLost, "valuable break"); } }
-        private static void PhysGrabObjectDestroyedPostfix(object __instance) { if (!CachedIsRunLevel(null)) return; Component val = GetValuableComponent(__instance); if (val == null) return; float cur = ReadValuableCurrentValue(val), orig = ReadValuableOriginalValue(val); if (orig > 0f && cur < orig * 0.15f) return; instance?.AddMapValue(-cur, "valuable destroyed"); if (!IsValuableInDollarHaul(val)) instance?.AddLostValue(cur, "valuable destroyed"); }
-        private static void EnemyVisionTriggerPostfix(object __instance, int playerID, object player, bool culled, bool playerNear) { instance?.HandleEnemyVisionTrigger(__instance, playerID); }
+        private static void ExtractionCompletedPostfix() { try { instance?.RefreshMapValue("extraction completed"); } catch { } }
+        private static void ValuableDollarValueSetRpcPostfix(object __instance, float value) { try { instance?.ScheduleMapValueRefresh("valuable rpc"); } catch { } }
+        private static void ValuableDollarValueSetLogicPostfix(object __instance) { try { if (CachedIsMasterClient()) instance?.ScheduleMapValueRefresh("valuable logic"); } catch { } }
+        private static void ValuableDollarHaulAddPostfix(object __instance) { try { TrackDollarHaulValuable(__instance, true); } catch { } }
+        private static void ValuableDollarHaulRemovePostfix(object __instance) { try { TrackDollarHaulValuable(__instance, false); } catch { } }
+        private static void PhysGrabObjectBreakPostfix(object __instance, float valueLost, bool _loseValue) { try { if (_loseValue) { instance?.AddMapValue(-valueLost, "valuable break"); instance?.AddLostValue(valueLost, "valuable break"); } } catch { } }
+        private static void PhysGrabObjectDestroyedPostfix(object __instance) { try { if (!CachedIsRunLevel(null)) return; Component val = GetValuableComponent(__instance); if (val == null) return; float cur = ReadValuableCurrentValue(val), orig = ReadValuableOriginalValue(val); if (orig > 0f && cur < orig * 0.15f) return; instance?.AddMapValue(-cur, "valuable destroyed"); if (!IsValuableInDollarHaul(val)) instance?.AddLostValue(cur, "valuable destroyed"); } catch { } }
+        private static void EnemyVisionTriggerPostfix(object __instance, int playerID, object player, bool culled, bool playerNear) { try { instance?.HandleEnemyVisionTrigger(__instance, playerID); } catch { } }
 
-        private static void EnemyHealthChangedPostfix(object __instance) { instance?.SyncEnemyHealthChanged(__instance); }
+        private static void EnemyHealthChangedPostfix(object __instance) { try { instance?.SyncEnemyHealthChanged(__instance); } catch { } }
         private static void EnemyHealthHurtRpcPostfix(object __instance, object[] __args)
         {
-            if (instance == null || !instance.gameplayActive || __instance == null || __args == null || __args.Length == 0) return;
-            float dmg = 0f; if (__args[0] != null) TryConvertFloat(__args[0], out dmg);
-            Component ep = ReadMember(ReadMember(__instance, "enemy") as Component ?? __instance, "EnemyParent") as Component;
-            if (ep != null && dmg > 0f)
+            try
             {
-                GameObject root = GetEnemyRoot(ep);
-                if (root != null)
+                if (instance == null || !instance.gameplayActive || __instance == null || __args == null || __args.Length == 0) return;
+                float dmg = 0f; if (__args[0] != null) TryConvertFloat(__args[0], out dmg);
+                Component ep = ReadMember(ReadMember(__instance, "enemy") as Component ?? __instance, "EnemyParent") as Component;
+                if (ep != null && dmg > 0f)
                 {
-                    var cand = new EnemyCandidate { Component = ep, Root = root, Center = Vector3.zero };
-                    int stableId = instance.GetStableEnemyId(cand);
-                    if (!instance.clientSimulatedHealth.ContainsKey(stableId) && instance.TryGetEnemyHealth(cand, out float h, out float mh)) instance.clientSimulatedHealth[stableId] = h;
-                    if (instance.clientSimulatedHealth.ContainsKey(stableId)) instance.clientSimulatedHealth[stableId] = Math.Max(0f, instance.clientSimulatedHealth[stableId] - dmg);
+                    GameObject root = GetEnemyRoot(ep);
+                    if (root != null)
+                    {
+                        var cand = new EnemyCandidate { Component = ep, Root = root, Center = Vector3.zero };
+                        int stableId = instance.GetStableEnemyId(cand);
+                        if (!instance.clientSimulatedHealth.ContainsKey(stableId) && instance.TryGetEnemyHealth(cand, out float h, out float mh)) instance.clientSimulatedHealth[stableId] = h;
+                        if (instance.clientSimulatedHealth.ContainsKey(stableId)) instance.clientSimulatedHealth[stableId] = Math.Max(0f, instance.clientSimulatedHealth[stableId] - dmg);
+                    }
+                    instance.SyncEnemyParentStatusChanged(ep);
                 }
-                instance.SyncEnemyParentStatusChanged(ep);
             }
+            catch { }
         }
 
         private static Type photonNetworkType, raiseEventOptionsType, sendOptionsType;
@@ -335,45 +329,23 @@ namespace OverlayHUD
 
         private static void SendOverlayEvent(object[] data)
         {
+            if (instance == null || !instance.enableNetworkSync.Value) return;
             if (raiseEventMethod == null) InitPhotonReflection();
             if (raiseEventMethod != null) { try { raiseEventMethod.Invoke(null, new object[] { (byte)187, data, raiseEventOptionsOthers, sendReliableOptions }); } catch { } }
         }
 
-        // Оптимизировано: прямое чтение свойств пакета вместо тяжелой рефлексии Dictionary
-        private static void OnPhotonEventPrefix(object photonEvent)
+        public void OnEvent(ExitGames.Client.Photon.EventData photonEvent)
         {
-            if (photonEvent == null || instance == null) return;
-            try
+            if (instance == null || !instance.enableNetworkSync.Value) return;
+            if (!gameplayActive || photonEvent.Code != 187) return;
+
+            if (photonEvent.CustomData is object[] data && data.Length >= 3)
             {
-                if (!eventReflectInit)
-                {
-                    Type t = photonEvent.GetType();
-                    eventCodeProp = t.GetProperty("Code", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (eventCodeProp == null) eventCodeField = t.GetField("Code", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    eventDataProp = t.GetProperty("CustomData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (eventDataProp == null) eventDataField = t.GetField("CustomData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    eventReflectInit = true;
-                }
-
-                byte code = 0;
-                if (eventCodeProp != null) code = (byte)eventCodeProp.GetValue(photonEvent, null);
-                else if (eventCodeField != null) code = (byte)eventCodeField.GetValue(photonEvent);
-
-                if (code == 187)
-                {
-                    object customData = null;
-                    if (eventDataProp != null) customData = eventDataProp.GetValue(photonEvent, null);
-                    else if (eventDataField != null) customData = eventDataField.GetValue(photonEvent);
-
-                    if (customData is object[] data && data.Length >= 3)
-                    {
-                        string action = data[0] as string; int viewId = Convert.ToInt32(data[1]);
-                        if (action == "SPOT") instance.HandleRemoteSpot(viewId, data[2] as string);
-                        else if (action == "TIMER") instance.HandleRemoteTimer(viewId, Convert.ToSingle(data[2], CultureInfo.InvariantCulture));
-                    }
-                }
+                string action = data[0] as string;
+                int viewId = Convert.ToInt32(data[1]);
+                if (action == "SPOT") HandleRemoteSpot(viewId, data[2] as string);
+                else if (action == "TIMER") HandleRemoteTimer(viewId, Convert.ToSingle(data[2], CultureInfo.InvariantCulture));
             }
-            catch { }
         }
 
         private int GetStableEnemyId(EnemyCandidate candidate)
@@ -409,16 +381,25 @@ namespace OverlayHUD
         private int GetEnemyViewId(Component ep, int iId)
         {
             if (viewIdByInstanceId.TryGetValue(iId, out int viewId)) return viewId;
-            if (viewIdFailedInstanceIds.Contains(iId)) return 0;
+
+            // Если проверяли меньше 2 секунд назад - пропускаем (TTL)
+            if (viewIdFailedInstanceIds.TryGetValue(iId, out float failedAt) && Time.realtimeSinceStartup - failedAt < 2f)
+                return 0;
 
             object photonView = ReadMember(ep, "photonView");
             if (photonView == null) { Component enemy = ReadMember(ep, "Enemy") as Component; if (enemy != null) photonView = ReadMember(enemy, "photonView"); }
             if (photonView != null)
             {
                 viewId = ReadIntMember(photonView, "ViewID");
-                if (viewId != 0) { viewIdByInstanceId[iId] = viewId; instanceIdByViewId[viewId] = iId; return viewId; }
+                if (viewId != 0)
+                {
+                    viewIdByInstanceId[iId] = viewId;
+                    instanceIdByViewId[viewId] = iId;
+                    viewIdFailedInstanceIds.Remove(iId); // Успех - убираем из черного списка
+                    return viewId;
+                }
             }
-            viewIdFailedInstanceIds.Add(iId);
+            viewIdFailedInstanceIds[iId] = Time.realtimeSinceStartup; // Обновляем время неудачи
             return 0;
         }
 
@@ -433,17 +414,6 @@ namespace OverlayHUD
             if (isCursorVisible != pendingCursorState) { pendingCursorState = isCursorVisible; cursorStateChangeTime = Time.unscaledTime + 0.3f; }
             if (pendingCursorState != wasCursorVisible && Time.unscaledTime >= cursorStateChangeTime) { wasCursorVisible = pendingCursorState; if (gameObject.activeInHierarchy) StartCoroutine(PostCursorState(wasCursorVisible)); }
 
-            // Оптимизировано: нет создания новых списков каждый кадр
-            if (!CachedIsMasterClient() && clientSimulatedTimers.Count > 0)
-            {
-                _timerKeysBuffer.Clear();
-                foreach (var kvp in clientSimulatedTimers) _timerKeysBuffer.Add(kvp.Key);
-                foreach (int k in _timerKeysBuffer)
-                {
-                    if (clientSimulatedTimers[k] > 0f)
-                        clientSimulatedTimers[k] = Math.Max(0f, clientSimulatedTimers[k] - Time.deltaTime);
-                }
-            }
             TickScan();
         }
 
@@ -473,7 +443,15 @@ namespace OverlayHUD
             try { SyncKnownEnemies(); } catch { }
         }
 
-        private void OnDestroy() { SceneManager.sceneLoaded -= OnSceneLoaded; harmony?.UnpatchSelf(); if (gameplayActive) HandleLevelChanging(); StopOverlayAppIfNeeded(); if (instance == this) instance = null; }
+        private void OnDestroy()
+        {
+            try { Photon.Pun.PhotonNetwork.RemoveCallbackTarget(this); } catch { }
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+            harmony?.UnpatchSelf();
+            if (gameplayActive) HandleLevelChanging();
+            StopOverlayAppIfNeeded();
+            if (instance == this) instance = null;
+        }
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode) { if (gameplayActive && !CachedIsRunLevel(scene.name)) HandleLevelChanging(); else if (!gameplayActive && CachedIsRunLevel(scene.name)) ScheduleGameplayActivation("Scene loaded"); }
         private void ScheduleGameplayActivation(string reason) { if (pendingGameplayActivation != null) StopCoroutine(pendingGameplayActivation); if (gameObject.activeInHierarchy) pendingGameplayActivation = StartCoroutine(ActivateGameplayAfterLevelChange(reason)); }
         private IEnumerator ActivateGameplayAfterLevelChange(string reason)
